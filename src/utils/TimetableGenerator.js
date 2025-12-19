@@ -89,25 +89,31 @@ export const generateClassTimetable = (
     };
 
     // 3. Allocation Loop
-    // We strive for 100% Student Occupancy.
+    // Tracking usage to spread subjects evenly
+    const subjectDayUsage = {}; // subjectCode -> day -> count
+    const subjectSessionUsage = {}; // subjectCode -> day -> { FN: bool, AN: bool }
 
     // Create a matrix of Day x Time
     const matrix = {};
     days.forEach(d => {
-        times.forEach(t => {
-            matrix[`${d}-${t}`] = null;
-        });
+        times.forEach(t => { matrix[`${d}-${t}`] = null; });
     });
 
     // Attempt to place slots
     for (const slot of slotPool) {
         let placed = false;
+        const subCode = slot.subject.code;
 
-        // Shuffle days/times for randomness distribution, but consistent if seeded
-        // Heuristic: Try to spread this subject across days first
-        // (Skipping complex spread logic for now, utilizing random shuffle)
-        // Heuristic: Try to spread this subject across days first
-        let dayIndices = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
+        if (!subjectDayUsage[subCode]) subjectDayUsage[subCode] = {};
+        if (!subjectSessionUsage[subCode]) subjectSessionUsage[subCode] = {};
+
+        // Heuristic: Prefer days with fewer sessions for this subject
+        let dayIndices = [0, 1, 2, 3, 4, 5].sort((a, b) => {
+            const usageA = subjectDayUsage[subCode][days[a]] || 0;
+            const usageB = subjectDayUsage[subCode][days[b]] || 0;
+            if (usageA !== usageB) return usageA - usageB;
+            return Math.random() - 0.5; // Randomize same-level days
+        });
 
         // If forceDay is specified (e.g., Saturday), only try that day
         if (slot.forceDay) {
@@ -118,22 +124,38 @@ export const generateClassTimetable = (
         for (const dIdx of dayIndices) {
             if (placed) break;
             const day = days[dIdx];
+            if (!subjectSessionUsage[subCode][day]) subjectSessionUsage[subCode][day] = { FN: false, AN: false };
 
-            // Try times
-            for (let tIdx = 0; tIdx <= times.length - slot.duration; tIdx++) {
+            // Determine preference: If we already have FN, try AN first, and vice-versa
+            let timeIndices = [0, 1, 2, 3, 4, 5, 6];
+            const hasFN = subjectSessionUsage[subCode][day].FN;
+            const hasAN = subjectSessionUsage[subCode][day].AN;
+
+            if (hasFN && !hasAN) {
+                // Prefer AN (4,5,6) then FN (0,1,2,3)
+                timeIndices = [4, 5, 6, 0, 1, 2, 3];
+            } else if (!hasFN && hasAN) {
+                // Prefer FN (0,1,2,3) then AN (4,5,6)
+                timeIndices = [0, 1, 2, 3, 4, 5, 6];
+            } else {
+                // Standard order or randomized
+                timeIndices = [0, 1, 2, 3, 4, 5, 6].sort(() => Math.random() - 0.5);
+            }
+
+            for (const tIdx of timeIndices) {
+                if (tIdx > times.length - slot.duration) continue;
                 const time = times[tIdx];
 
                 // 1. Valid Slot?
                 let collides = false;
                 for (let k = 0; k < slot.duration; k++) {
                     if (matrix[`${day}-${times[tIdx + k]}`]) collides = true;
-
                     // LUNCH BREAK CONSTRAINT: Session cannot cross from period 4 (idx 3) to period 5 (idx 4)
                     if (tIdx < 4 && (tIdx + k) >= 4) collides = true;
                 }
                 if (collides) continue;
 
-                // 2. Teacher Available? (Skip for special forced slots without specific teachers)
+                // 2. Teacher Available?
                 let teacherClash = false;
                 if (slot.teacher?.id !== 'special') {
                     for (let k = 0; k < slot.duration; k++) {
@@ -146,6 +168,11 @@ export const generateClassTimetable = (
                 for (let k = 0; k < slot.duration; k++) {
                     const exactTime = times[tIdx + k];
                     matrix[`${day}-${exactTime}`] = slot;
+
+                    // Update tracking
+                    subjectDayUsage[subCode][day] = (subjectDayUsage[subCode][day] || 0) + 1;
+                    if (tIdx + k < 4) subjectSessionUsage[subCode][day].FN = true;
+                    else subjectSessionUsage[subCode][day].AN = true;
                 }
                 placed = true;
                 break;
@@ -153,9 +180,7 @@ export const generateClassTimetable = (
         }
 
         if (!placed) {
-            log.push(`Could not place ${slot.subject.code} (${slot.type}). Workload overflow or clashing.`);
-            // Fallback: Place anyway? No, user wants Valid constraints.
-            // We leave it empty and report error.
+            log.push(`Could not place ${slot.subject.code} (${slot.type}). Constraints too tight.`);
         }
     }
 
