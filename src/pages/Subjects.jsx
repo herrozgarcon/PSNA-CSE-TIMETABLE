@@ -17,7 +17,17 @@ const Subjects = () => {
         credits: '',
         alternatives: []
     });
-    const [isEditing, setIsEditing] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [filterSem, setFilterSem] = useState('All');
+    const [filterType, setFilterType] = useState('All');
+
+    const filteredSubjects = subjects.filter(sub => {
+        const matchesSearch = (sub.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            sub.code?.toLowerCase().includes(searchTerm.toLowerCase()));
+        const matchesSem = filterSem === 'All' || sub.semester === filterSem;
+        const matchesType = filterType === 'All' || sub.type === filterType;
+        return matchesSearch && matchesSem && matchesType;
+    });
 
     const openAddModal = () => {
         setIsEditing(false);
@@ -55,24 +65,56 @@ const Subjects = () => {
             <div className="page-header">
                 <div>
                     <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold' }}>Subjects</h1>
-                    <p style={{ color: 'var(--text-light)' }}>View and manage course catalog.</p>
+                    <p style={{ color: 'var(--text-light)' }}>View and manage course catalog ({filteredSubjects.length} shown).</p>
                 </div>
-                <div className="input-group">
-                    <button
-                        className="btn btn-outline"
-                        onClick={handleClearAll}
-                        style={{ color: 'var(--danger)', borderColor: 'var(--danger)', marginRight: '0.5rem' }}
-                    >
-                        <Trash2 size={18} style={{ marginRight: '0.5rem' }} />
-                        Clear All
-                    </button>
+                <div className="input-group" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+
+                    {/* Filter Section */}
+                    <div style={{ display: 'flex', gap: '8px', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
+                        <select
+                            className="input-field"
+                            style={{ padding: '4px 8px', height: 'auto', border: 'none', background: filterSem === 'All' ? 'transparent' : '#fff', fontSize: '0.85rem' }}
+                            value={filterSem}
+                            onChange={(e) => setFilterSem(e.target.value)}
+                        >
+                            <option value="All">All Sems</option>
+                            {['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'].map(s => <option key={s} value={s}>Sem {s}</option>)}
+                        </select>
+                        <select
+                            className="input-field"
+                            style={{ padding: '4px 8px', height: 'auto', border: 'none', background: filterType === 'All' ? 'transparent' : '#fff', fontSize: '0.85rem' }}
+                            value={filterType}
+                            onChange={(e) => setFilterType(e.target.value)}
+                        >
+                            <option value="All">All Types</option>
+                            <option value="Lecture">Lecture</option>
+                            <option value="Lab">Lab</option>
+                        </select>
+                    </div>
+
                     <div style={{ position: 'relative' }}>
                         <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-light)' }} />
-                        <input type="text" placeholder="Search subjects..." className="input-field" style={{ paddingLeft: '36px' }} />
+                        <input
+                            type="text"
+                            placeholder="Search code or name..."
+                            className="input-field"
+                            style={{ paddingLeft: '36px', minWidth: '200px' }}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
                     </div>
+
                     <button className="btn btn-primary" onClick={openAddModal}>
                         <Plus size={18} style={{ marginRight: '0.5rem' }} />
                         Add Subject
+                    </button>
+
+                    <button
+                        className="btn btn-outline"
+                        onClick={handleClearAll}
+                        style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                    >
+                        <Trash2 size={18} />
                     </button>
                 </div>
             </div>
@@ -90,14 +132,14 @@ const Subjects = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {subjects.length === 0 ? (
+                        {filteredSubjects.length === 0 ? (
                             <tr>
-                                <td colSpan="5" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-light)' }}>
-                                    No subjects found. Add one to get started.
+                                <td colSpan="6" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-light)' }}>
+                                    {subjects.length === 0 ? "No subjects found. Add one to get started." : "No subjects match your filters."}
                                 </td>
                             </tr>
                         ) : (
-                            subjects.map((subject) => (
+                            filteredSubjects.map((subject) => (
                                 <tr key={subject.id}>
                                     <td>
                                         <span className="badge badge-outline">{subject.semester || '-'}</span>
