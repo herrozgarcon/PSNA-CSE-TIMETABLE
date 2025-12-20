@@ -92,6 +92,7 @@ export const generateClassTimetable = (
     // Tracking usage to spread subjects evenly
     const subjectDayUsage = {}; // subjectCode -> day -> count
     const subjectSessionUsage = {}; // subjectCode -> day -> { FN: bool, AN: bool }
+    const subjectTimeFreq = {}; // subjectCode -> timeIdx -> count (to prevent same pattern)
 
     // Create a matrix of Day x Time
     const matrix = {};
@@ -106,6 +107,7 @@ export const generateClassTimetable = (
 
         if (!subjectDayUsage[subCode]) subjectDayUsage[subCode] = {};
         if (!subjectSessionUsage[subCode]) subjectSessionUsage[subCode] = {};
+        if (!subjectTimeFreq[subCode]) subjectTimeFreq[subCode] = {};
 
         // Heuristic: Prefer days with fewer sessions for this subject
         let dayIndices = [0, 1, 2, 3, 4, 5].sort((a, b) => {
@@ -127,23 +129,29 @@ export const generateClassTimetable = (
             if (!subjectSessionUsage[subCode][day]) subjectSessionUsage[subCode][day] = { FN: false, AN: false };
 
             // Determine preference: If we already have FN, try AN first, and vice-versa
-            let timeIndices = [0, 1, 2, 3, 4, 5, 6];
+            // Also prioritize time indices where this subject HAS NOT been placed yet
+            let timeIndices = [0, 1, 2, 3, 4, 5, 6].sort((a, b) => {
+                const freqA = subjectTimeFreq[subCode][a] || 0;
+                const freqB = subjectTimeFreq[subCode][b] || 0;
+                if (freqA !== freqB) return freqA - freqB; // Try less frequent times first
+                return Math.random() - 0.5;
+            });
+
             const hasFN = subjectSessionUsage[subCode][day].FN;
             const hasAN = subjectSessionUsage[subCode][day].AN;
 
+            // Re-sort based on FN/AN preference if applicable
             if (hasFN && !hasAN) {
-                // Prefer AN (4,5,6) then FN (0,1,2,3)
-                timeIndices = [4, 5, 6, 0, 1, 2, 3];
+                timeIndices = [...timeIndices.filter(i => i >= 4), ...timeIndices.filter(i => i < 4)];
             } else if (!hasFN && hasAN) {
-                // Prefer FN (0,1,2,3) then AN (4,5,6)
-                timeIndices = [0, 1, 2, 3, 4, 5, 6];
-            } else {
-                // Standard order or randomized
-                timeIndices = [0, 1, 2, 3, 4, 5, 6].sort(() => Math.random() - 0.5);
+                timeIndices = [...timeIndices.filter(i => i < 4), ...timeIndices.filter(i => i >= 4)];
             }
 
             for (const tIdx of timeIndices) {
                 if (tIdx > times.length - slot.duration) continue;
+
+                // NEW CONSTRAINT: Editable subject should not come at 1st period (index 0)
+                if (subCode === 'EDITABLE' && tIdx === 0) continue;
 
                 // NEW CONSTRAINT: Lab periods should not start at 4th period (index 3)
                 if (slot.isLab && tIdx === 3) continue;
@@ -195,6 +203,7 @@ export const generateClassTimetable = (
 
                     // Update tracking
                     subjectDayUsage[subCode][day] = (subjectDayUsage[subCode][day] || 0) + 1;
+                    subjectTimeFreq[subCode][tIdx + k] = (subjectTimeFreq[subCode][tIdx + k] || 0) + 1;
                     if (tIdx + k < 4) subjectSessionUsage[subCode][day].FN = true;
                     else subjectSessionUsage[subCode][day].AN = true;
                 }
