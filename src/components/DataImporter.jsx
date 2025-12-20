@@ -185,20 +185,28 @@ const DataImporter = () => {
                 const subjectMap = new Map();
                 for (let i = headerRowIdx + 1; i < rows.length; i++) {
                     const row = rows[i];
-                    const rawFullName = row[colMap.fullName];
-                    if (!rawFullName || String(rawFullName).toLowerCase().includes('total')) continue;
+                    const fullNameRaw = String(row[colMap.fullName]).trim();
+                    if (!fullNameRaw || String(fullNameRaw).toLowerCase().includes('total')) continue;
 
-                    const code = (row[colMap.code] ? String(row[colMap.code]).trim() : (String(rawFullName).match(/^[A-Z0-9]+/i)?.[0] || 'UNK')).toUpperCase();
-                    let name = String(rawFullName).replace(code, '').trim();
-                    // Clean up potential leading dashes/dots from name
-                    if (name.startsWith('-') || name.startsWith('.')) name = name.substring(1).trim();
+                    // Extract code and name more reliably
+                    // Handle "CS2411 Theory of Computation" or "CS2411 - Theory of Computation"
+                    const codeMatch = fullNameRaw.match(/^([A-Z]{2,4}[0-9]{3,4})/i);
+                    const code = (row[colMap.code] ? String(row[colMap.code]).trim() : (codeMatch ? codeMatch[1] : '')).toUpperCase();
+
+                    let name = fullNameRaw;
+                    if (code && name.toUpperCase().startsWith(code)) {
+                        name = name.substring(code.length).replace(/^[\s\-\.]+/, '').trim();
+                    }
+
+                    // If no code found, use the name as the key (deduplicate by exact name)
+                    const subKey = code || name.toUpperCase();
 
                     const semester = String(row[colMap.semester] || '').trim();
                     const credits = String(row[colMap.credit] || '3').trim();
 
-                    if (!subjectMap.has(code)) {
-                        subjectMap.set(code, {
-                            code,
+                    if (!subjectMap.has(subKey)) {
+                        subjectMap.set(subKey, {
+                            code: code || 'TBD',
                             name,
                             semester,
                             type: name.toLowerCase().includes('lab') ? 'Lab' : 'Lecture',
@@ -212,19 +220,20 @@ const DataImporter = () => {
                             // Skip common placeholders or empty values
                             if (!teacherInitial || teacherInitial === '0' || teacherInitial === '-' || teacherInitial === 'NIL') return;
 
-                            // HEURISTIC: Teacher initials should be short (e.g., "NU", "DR.N.S"). 
-                            // If the cell contains a long string (> 20 chars), it's likely a misparsed subject/elective name.
-                            if (teacherInitial.length > 20) return;
+                            // STRICT HEURISTIC: Teacher initials are short (e.g., "NU", "DR.NS"). 
+                            // In PSNA format, codes like "I ME CP1242" in elective rows are NOT teachers.
+                            // We set a hard limit of 10 characters for valid initials.
+                            if (teacherInitial.length > 10) return;
 
                             const faculty = facultyMap.get(teacherInitial) || { name: teacherInitial, department: 'CSE' };
 
-                            // One more safety: if the "name" still looks like a subject code (starts with 2-4 uppercase + 4 digits)
+                            // Safety: if the "name" still looks like a subject code
                             if (/^[A-Z]{2,4}[0-9]{4}/.test(faculty.name) && faculty.name.length > 10) return;
 
                             assignments.push({
                                 name: faculty.name.trim(),
                                 department: faculty.department,
-                                subject: `${code} - ${name}`,
+                                subject: `${code || 'TBD'} - ${name}`,
                                 semester: semester,
                                 assignedClass: `Section ${sec.id}`,
                                 initial: teacherInitial

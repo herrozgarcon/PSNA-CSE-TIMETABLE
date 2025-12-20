@@ -152,26 +152,9 @@ const TimetableEditor = ({ selectedSemester, activeSection, schedule, setSchedul
         );
         let usedAllSubjects = false;
 
-        // --- FALLBACK LOGIC ---
         if (classTeachers.length === 0) {
-            const unassignedTeachers = teachers.filter(t => !t.assignedClass || t.assignedClass === '-' || t.assignedClass === 'None' || t.assignedClass === '');
-            if (unassignedTeachers.length > 0) {
-                if (window.confirm(`No teachers explicitly assigned to ${currentClassLabel}.\n\nFound ${unassignedTeachers.length} unassigned teachers. Do you want to use them for this timetable?`)) {
-                    classTeachers = unassignedTeachers;
-                    // Persist assignment to these teachers
-                    if (updateTeachers) {
-                        updateTeachers(unassignedTeachers.map(t => ({ ...t, assignedClass: currentClassLabel })));
-                    }
-                }
-            }
-        }
-
-        if (classTeachers.length === 0) {
-            const confirmTest = window.confirm(
-                `No teachers found. Generate a sample timetable using ALL available subjects instead? \n(This is useful for testing without assigning teachers first)`
-            );
-            if (!confirmTest) return;
-            usedAllSubjects = true;
+            alert(`No teachers or subjects are assigned to ${currentClassLabel}.\n\nPlease go to the 'Allocations' page to assign faculty to this section before generating.`);
+            return;
         }
 
         // 2. Prepare Assignments List for Generator
