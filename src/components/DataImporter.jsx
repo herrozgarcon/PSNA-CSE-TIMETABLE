@@ -170,7 +170,8 @@ const DataImporter = () => {
                             name = name.substring(code.length).replace(/^[\s\-\.]+/, '').trim();
                         }
                         const subKey = code || name.toUpperCase();
-                        const semester = String(row[colMap.semester] || '').trim();
+                        const semRaw = String(row[colMap.semester] || '').trim();
+                        const semester = semRaw.match(/^(I|II|III|IV|V|VI|VII|VIII|1|2|3|4|5|6|7|8)/i)?.[0].toUpperCase() || semRaw;
                         const credits = String(row[colMap.credit] || '3').trim();
 
                         if (!globalSubjectMap.has(subKey)) {
@@ -262,6 +263,10 @@ const DataImporter = () => {
                     // 1. Process Subject Data (Global across all sheets)
                     const subRaw = map.subject ? String(row[map.subject] || '').trim() : '';
                     if (subRaw && !subRaw.toLowerCase().includes('subject') && subRaw.length > 2) {
+                        // Extract semester if it's at the start (e.g., "VI CS2611")
+                        const semMatch = subRaw.match(/^(I|II|III|IV|V|VI|VII|VIII)\s+/i);
+                        const cleanSem = semMatch ? semMatch[1].toUpperCase() : '';
+
                         let cleanSubRaw = subRaw.replace(/^(I|II|III|IV|V|VI|VII|VIII)\s+/i, '').trim();
                         const codeMatch = cleanSubRaw.match(/^([A-Z]{2,4}[0-9]{3,4})/i);
                         const code = codeMatch ? codeMatch[1].toUpperCase() : 'TBD';
@@ -276,6 +281,7 @@ const DataImporter = () => {
                                 id: subId,
                                 code: code,
                                 name: subName || cleanSubRaw,
+                                semester: cleanSem,
                                 type: (typeRaw.toLowerCase().includes('lab') || cleanSubRaw.toLowerCase().includes('lab')) ? 'Lab' : 'Lecture',
                                 credits: isNaN(parseInt(credRaw)) ? '3' : credRaw
                             });
@@ -312,6 +318,7 @@ const DataImporter = () => {
                                 department: dept,
                                 subject: `${code} - ${subName || cleanSubRaw}`,
                                 assignedClass: finalClass,
+                                semester: cleanSem,
                                 alternatives: [row[map.alt1], row[map.alt2], row[map.alt3]].filter(Boolean).map(a => String(a).trim())
                             });
                         }
