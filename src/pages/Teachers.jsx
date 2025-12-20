@@ -19,6 +19,17 @@ const Teachers = () => {
         phone: ''
     });
     const [isEditing, setIsEditing] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [filterSem, setFilterSem] = useState('All');
+    const [filterSec, setFilterSec] = useState('All');
+
+    const filteredTeachers = (teachers || []).filter(t => {
+        const matchesSearch = (t.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            t.subject?.toLowerCase().includes(searchTerm.toLowerCase()));
+        const matchesSem = filterSem === 'All' || t.semester === filterSem;
+        const matchesSec = filterSec === 'All' || t.assignedClass?.includes(filterSec);
+        return matchesSearch && matchesSem && matchesSec;
+    });
 
     const openAddModal = () => {
         setIsEditing(false);
@@ -57,20 +68,55 @@ const Teachers = () => {
             <div className="page-header">
                 <div>
                     <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold' }}>Teachers</h1>
-                    <p style={{ color: 'var(--text-light)' }}>Manage faculty members and their details.</p>
+                    <p style={{ color: 'var(--text-light)' }}>Manage faculty appointments ({filteredTeachers.length} shown).</p>
                 </div>
-                <div className="input-group">
+                <div className="input-group" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+
+                    {/* Filters */}
+                    <div style={{ display: 'flex', gap: '8px', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
+                        <select
+                            className="input-field"
+                            style={{ padding: '4px 8px', height: 'auto', border: 'none', background: filterSem === 'All' ? 'transparent' : '#fff', fontSize: '0.85rem' }}
+                            value={filterSem}
+                            onChange={(e) => setFilterSem(e.target.value)}
+                        >
+                            <option value="All">All Sems</option>
+                            {['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'].map(s => <option key={s} value={s}>Sem {s}</option>)}
+                        </select>
+                        <select
+                            className="input-field"
+                            style={{ padding: '4px 8px', height: 'auto', border: 'none', background: filterSec === 'All' ? 'transparent' : '#fff', fontSize: '0.85rem' }}
+                            value={filterSec}
+                            onChange={(e) => setFilterSec(e.target.value)}
+                        >
+                            <option value="All">All Sections</option>
+                            {['A', 'B', 'C', 'D', 'E'].map(s => <option key={s} value={s}>Section {s}</option>)}
+                        </select>
+                    </div>
+
                     <div style={{ position: 'relative' }}>
                         <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-light)' }} />
-                        <input type="text" placeholder="Search teachers..." className="input-field" style={{ paddingLeft: '36px' }} />
+                        <input
+                            type="text"
+                            placeholder="Search names or subjects..."
+                            className="input-field"
+                            style={{ paddingLeft: '36px', minWidth: '200px' }}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
                     </div>
-                    <button className="btn btn-outline" style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={handleClearAll}>
-                        <Trash2 size={18} style={{ marginRight: '0.5rem' }} />
-                        Clear All
-                    </button>
+
                     <button className="btn btn-primary" onClick={openAddModal}>
                         <Plus size={18} style={{ marginRight: '0.5rem' }} />
                         Add Teacher
+                    </button>
+
+                    <button
+                        className="btn btn-outline"
+                        onClick={handleClearAll}
+                        style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                    >
+                        <Trash2 size={18} />
                     </button>
                 </div>
             </div>
@@ -88,14 +134,14 @@ const Teachers = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {teachers.length === 0 ? (
+                        {filteredTeachers.length === 0 ? (
                             <tr>
-                                <td colSpan="5" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-light)' }}>
-                                    No teachers found. Add one to get started.
+                                <td colSpan="6" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-light)' }}>
+                                    {teachers.length === 0 ? "No teacher assignments found. Add one to get started." : "No faculty match your filters."}
                                 </td>
                             </tr>
                         ) : (
-                            teachers.map((teacher) => (
+                            filteredTeachers.map((teacher) => (
                                 <tr key={teacher.id}>
                                     <td>
                                         <div style={{ fontWeight: 500 }}>{teacher.name}</div>
