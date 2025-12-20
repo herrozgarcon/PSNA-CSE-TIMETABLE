@@ -80,11 +80,14 @@ const Allocations = () => {
         }
     };
 
+    const [typeFilter, setTypeFilter] = useState('All');
+
     const filteredSubjects = subjects.filter(s => {
         const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             s.code.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesSemester = !semesterFilter || s.semester === semesterFilter;
-        return matchesSearch && matchesSemester;
+        const matchesType = typeFilter === 'All' || s.type === typeFilter;
+        return matchesSearch && matchesSemester && matchesType;
     });
 
     return (
@@ -93,25 +96,40 @@ const Allocations = () => {
                 <div className="page-header" style={{ marginBottom: '2rem' }}>
                     <div>
                         <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold' }}>Subject Allocation</h1>
-                        <p style={{ color: 'var(--text-light)' }}>Assign faculty members to subject sections (Grid View).</p>
+                        <p style={{ color: 'var(--text-light)' }}>Assign faculty members to subject sections ({filteredSubjects.length} subjects shown).</p>
                     </div>
-                    <div className="input-group" style={{ display: 'flex', gap: '1rem' }}>
-                        <select
-                            className="input-field"
-                            style={{ minWidth: '120px' }}
-                            value={semesterFilter}
-                            onChange={(e) => setSemesterFilter(e.target.value)}
-                        >
-                            <option value="">All Semesters</option>
-                            {semesters.map(s => <option key={s} value={s}>Semester {s}</option>)}
-                        </select>
+                    <div className="input-group" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+
+                        {/* Filter Group */}
+                        <div style={{ display: 'flex', gap: '8px', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
+                            <select
+                                className="input-field"
+                                style={{ padding: '4px 8px', height: 'auto', border: 'none', background: semesterFilter === '' ? 'transparent' : '#fff', fontSize: '0.85rem' }}
+                                value={semesterFilter}
+                                onChange={(e) => setSemesterFilter(e.target.value)}
+                            >
+                                <option value="">All Sems</option>
+                                {semesters.map(s => <option key={s} value={s}>Sem {s}</option>)}
+                            </select>
+                            <select
+                                className="input-field"
+                                style={{ padding: '4px 8px', height: 'auto', border: 'none', background: typeFilter === 'All' ? 'transparent' : '#fff', fontSize: '0.85rem' }}
+                                value={typeFilter}
+                                onChange={(e) => setTypeFilter(e.target.value)}
+                            >
+                                <option value="All">All Types</option>
+                                <option value="Lecture">Lecture</option>
+                                <option value="Lab">Lab</option>
+                            </select>
+                        </div>
+
                         <div style={{ position: 'relative' }}>
                             <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-light)' }} />
                             <input
                                 type="text"
                                 placeholder="Search subjects..."
                                 className="input-field"
-                                style={{ paddingLeft: '36px' }}
+                                style={{ paddingLeft: '36px', minWidth: '200px' }}
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
