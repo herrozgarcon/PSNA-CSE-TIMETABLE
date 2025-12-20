@@ -132,6 +132,7 @@ export const generateClassTimetable = (
         for (const dIdx of dayIndices) {
             if (placed) break;
             const day = days[dIdx];
+            if (slot.isLab && day === 'Saturday') continue;
             if (!subjectSessionUsage[subCode][day]) subjectSessionUsage[subCode][day] = { FN: false, AN: false };
 
             // Determine preference: If we already have FN, try AN first, and vice-versa
