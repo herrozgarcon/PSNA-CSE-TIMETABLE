@@ -117,7 +117,11 @@ const DataImporter = () => {
                         const r = rows[j];
                         const ini = String(r[initCol] || '').trim().toUpperCase();
                         const full = String(r[nameCol] || '').trim();
-                        if (ini && full && ini.length <= 5 && full.length > 5) {
+
+                        // SAFETY: Skip if it looks like a subject (starts with Year/Semester info like "IV", "VI" or has course codes)
+                        const isSubjectLike = /^[I|V|X]+ /i.test(full) || /[A-Z]{2,4}[0-9]{4}/.test(full);
+
+                        if (ini && full && ini.length <= 5 && full.length > 5 && !isSubjectLike) {
                             facultyMap.set(ini, { name: full, department: 'CSE' });
                         } else if (j > i + 5 && (!ini || !full)) {
                             break; // Stop if we hit a gap
@@ -134,11 +138,12 @@ const DataImporter = () => {
                     for (let i = 0; i < values.length - 1; i++) {
                         const v1 = values[i];
                         const v2 = values[i + 1];
-                        if ((v1.length >= 2 && v1.length <= 5 && (v2.includes('Dr.') || v2.includes('Mr.') || v2.includes('Ms.'))) ||
-                            (v2.length >= 2 && v2.length <= 5 && (v1.includes('Dr.') || v1.includes('Mr.') || v1.includes('Ms.')))) {
-                            const initial = v1.length <= 5 ? v1 : v2;
-                            const fullName = v1.length > 5 ? v1 : v2;
-                            facultyMap.set(initial.toUpperCase(), { name: fullName, department: 'CSE' });
+
+                        const looksLikeName = v2.includes('Dr.') || v2.includes('Mr.') || v2.includes('Ms.') || v2.includes('.');
+                        const isSubjectLike = /^[I|V|X]+ /i.test(v2) || /[A-Z]{2,4}[0-9]{4}/.test(v2);
+
+                        if (v1.length >= 2 && v1.length <= 5 && looksLikeName && !isSubjectLike) {
+                            facultyMap.set(v1.toUpperCase(), { name: v2, department: 'CSE' });
                         }
                     }
                 }
@@ -207,9 +212,17 @@ const DataImporter = () => {
                             // Skip common placeholders or empty values
                             if (!teacherInitial || teacherInitial === '0' || teacherInitial === '-' || teacherInitial === 'NIL') return;
 
+                            // HEURISTIC: Teacher initials should be short (e.g., "NU", "DR.N.S"). 
+                            // If the cell contains a long string (> 20 chars), it's likely a misparsed subject/elective name.
+                            if (teacherInitial.length > 20) return;
+
                             const faculty = facultyMap.get(teacherInitial) || { name: teacherInitial, department: 'CSE' };
+
+                            // One more safety: if the "name" still looks like a subject code (starts with 2-4 uppercase + 4 digits)
+                            if (/^[A-Z]{2,4}[0-9]{4}/.test(faculty.name) && faculty.name.length > 10) return;
+
                             assignments.push({
-                                name: faculty.name,
+                                name: faculty.name.trim(),
                                 department: faculty.department,
                                 subject: `${code} - ${name}`,
                                 semester: semester,
