@@ -144,6 +144,10 @@ export const generateClassTimetable = (
 
             for (const tIdx of timeIndices) {
                 if (tIdx > times.length - slot.duration) continue;
+
+                // NEW CONSTRAINT: Lab periods should not start at 4th period (index 3)
+                if (slot.isLab && tIdx === 3) continue;
+
                 const time = times[tIdx];
 
                 // 1. Valid Slot?
@@ -154,6 +158,26 @@ export const generateClassTimetable = (
                     if (tIdx < 4 && (tIdx + k) >= 4) collides = true;
                 }
                 if (collides) continue;
+
+                // NEW CONSTRAINT: If multiple periods on same day, they MUST NOT be continuous
+                // And must respect FN/AN split.
+                const alreadyOnDay = (subjectDayUsage[subCode][day] || 0) > 0;
+                if (alreadyOnDay && !slot.isLab) {
+                    // Check neighbors to prevent continuous periods for same subject
+                    const prevSlot = tIdx > 0 ? matrix[`${day}-${times[tIdx - 1]}`] : null;
+                    const nextSlot = (tIdx + slot.duration) < times.length ? matrix[`${day}-${times[tIdx + slot.duration]}`] : null;
+                    if (prevSlot?.subject?.code === subCode || nextSlot?.subject?.code === subCode) {
+                        continue;
+                    }
+
+                    // Enforce FN/AN split: If FN exists, this must be AN, and vice versa.
+                    const isTryingFN = tIdx < 4;
+                    const isTryingAN = tIdx >= 4;
+                    const daySessions = subjectSessionUsage[subCode][day];
+                    if ((isTryingFN && daySessions.FN) || (isTryingAN && daySessions.AN)) {
+                        continue;
+                    }
+                }
 
                 // 2. Teacher Available?
                 let teacherClash = false;
