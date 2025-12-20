@@ -54,8 +54,8 @@ const DataImporter = () => {
                 // Detect Allocation Format (PSNA Style)
                 const isAllocationFormat = workbook.SheetNames.some(name => {
                     const rows = sheets[name];
-                    if (rows.length < 10) return false;
-                    const headerRow = rows.find(r => Object.values(r).some(v => String(v).includes('Subj Code & Name')));
+                    if (!rows || rows.length < 5) return false;
+                    const headerRow = rows.find(r => Object.values(r).some(v => /subj code & name/i.test(String(v))));
                     return !!headerRow;
                 });
 
@@ -87,7 +87,7 @@ const DataImporter = () => {
 
     const processAllocationFormat = (sheets) => {
         const facultyMap = new Map();
-        const subjects = [];
+        const globalSubjectMap = new Map();
         const assignments = [];
         const headerErrors = [];
 
@@ -98,11 +98,9 @@ const DataImporter = () => {
             const rows = sheets[name];
             if (!rows || rows.length === 0) return;
 
-            // Look for a table that has "Name of the faculty" and "Initials"
             let initCol = null;
             let nameCol = null;
 
-            // Try to find headers in the first 50 rows of each sheet
             for (let i = 0; i < Math.min(rows.length, 50); i++) {
                 const row = rows[i];
                 Object.entries(row).forEach(([key, val]) => {
@@ -112,59 +110,36 @@ const DataImporter = () => {
                 });
 
                 if (initCol && nameCol) {
-                    // Harvest from subsequent rows until break
                     for (let j = i + 1; j < rows.length; j++) {
                         const r = rows[j];
                         const ini = String(r[initCol] || '').trim().toUpperCase();
                         const full = String(r[nameCol] || '').trim();
-
-                        // SAFETY: Skip if it looks like a subject (starts with Year/Semester info like "IV", "VI" or has course codes)
                         const isSubjectLike = /^[I|V|X]+ /i.test(full) || /[A-Z]{2,4}[0-9]{4}/.test(full);
 
                         if (ini && full && ini.length <= 5 && full.length > 5 && !isSubjectLike) {
                             facultyMap.set(ini, { name: full, department: 'CSE' });
                         } else if (j > i + 5 && (!ini || !full)) {
-                            break; // Stop if we hit a gap
+                            break;
                         }
                     }
                     break;
                 }
             }
-
-            // Fallback: Fuzzy heuristic (if no clear headers found)
-            rows.forEach(row => {
-                const values = Object.values(row).map(v => String(v).trim());
-                if (values.length >= 2) {
-                    for (let i = 0; i < values.length - 1; i++) {
-                        const v1 = values[i];
-                        const v2 = values[i + 1];
-
-                        const looksLikeName = v2.includes('Dr.') || v2.includes('Mr.') || v2.includes('Ms.') || v2.includes('.');
-                        const isSubjectLike = /^[I|V|X]+ /i.test(v2) || /[A-Z]{2,4}[0-9]{4}/.test(v2);
-
-                        if (v1.length >= 2 && v1.length <= 5 && looksLikeName && !isSubjectLike) {
-                            facultyMap.set(v1.toUpperCase(), { name: v2, department: 'CSE' });
-                        }
-                    }
-                }
-            });
         });
 
-        // 2. Identify the Main Sheet and Parse Subjects/Assignments
+        // 2. Identify and Parse Subjects/Assignments from all sheets
         sheetKeys.forEach(sheetName => {
             const rows = sheets[sheetName];
-            if (!rows || rows.length === 0) return;
+            if (!rows) return;
 
-            // Find header row (the one with 'subj code & name')
-            let headerRowIdx = -1;
-            for (let i = 0; i < Math.min(rows.length, 25); i++) {
-                if (Object.values(rows[i]).some(v => String(v).toLowerCase().includes('subj code & name'))) {
-                    headerRowIdx = i;
-                    break;
+            let headerRows = [];
+            for (let i = 0; i < Math.min(rows.length, 500); i++) {
+                if (Object.values(rows[i]).some(v => /subj code & name/i.test(String(v)))) {
+                    headerRows.push(i);
                 }
             }
 
-            if (headerRowIdx !== -1) {
+            headerRows.forEach(headerRowIdx => {
                 const headerRow = rows[headerRowIdx];
                 const colMap = {};
                 Object.entries(headerRow).forEach(([key, val]) => {
@@ -172,7 +147,6 @@ const DataImporter = () => {
                     if (v.includes('sem. no') || v === 'sem' || v === 'semester') colMap.semester = key;
                     if (v.includes('code') && !v.includes('name')) colMap.code = key;
                     if (v.includes('subj code & name')) colMap.fullName = key;
-                    if (v.includes('no of section') || v.includes('section count')) colMap.sectionsCount = key;
                     if (v.includes('credit')) colMap.credit = key;
                     if (['a', 'b', 'c', 'd', 'e'].includes(v)) {
                         if (!colMap.secCols) colMap.secCols = [];
@@ -180,80 +154,69 @@ const DataImporter = () => {
                     }
                 });
 
-                if (!colMap.fullName) return; // Not the main allocation sheet
+                if (colMap.fullName) {
+                    for (let i = headerRowIdx + 1; i < rows.length; i++) {
+                        const row = rows[i];
+                        const fullNameRaw = String(row[colMap.fullName] || '').trim();
+                        if (!fullNameRaw || /total/i.test(fullNameRaw)) {
+                            if (i > headerRowIdx + 5) break;
+                            continue;
+                        }
 
-                const subjectMap = new Map();
-                for (let i = headerRowIdx + 1; i < rows.length; i++) {
-                    const row = rows[i];
-                    const fullNameRaw = String(row[colMap.fullName]).trim();
-                    if (!fullNameRaw || String(fullNameRaw).toLowerCase().includes('total')) continue;
+                        const codeMatch = fullNameRaw.match(/^([A-Z]{2,4}[0-9]{3,4})/i);
+                        const code = (row[colMap.code] ? String(row[colMap.code]).trim() : (codeMatch ? codeMatch[1] : '')).toUpperCase();
+                        let name = fullNameRaw;
+                        if (code && name.toUpperCase().startsWith(code)) {
+                            name = name.substring(code.length).replace(/^[\s\-\.]+/, '').trim();
+                        }
+                        const subKey = code || name.toUpperCase();
+                        const semester = String(row[colMap.semester] || '').trim();
+                        const credits = String(row[colMap.credit] || '3').trim();
 
-                    // Extract code and name more reliably
-                    // Handle "CS2411 Theory of Computation" or "CS2411 - Theory of Computation"
-                    const codeMatch = fullNameRaw.match(/^([A-Z]{2,4}[0-9]{3,4})/i);
-                    const code = (row[colMap.code] ? String(row[colMap.code]).trim() : (codeMatch ? codeMatch[1] : '')).toUpperCase();
-
-                    let name = fullNameRaw;
-                    if (code && name.toUpperCase().startsWith(code)) {
-                        name = name.substring(code.length).replace(/^[\s\-\.]+/, '').trim();
-                    }
-
-                    // If no code found, use the name as the key (deduplicate by exact name)
-                    const subKey = code || name.toUpperCase();
-
-                    const semester = String(row[colMap.semester] || '').trim();
-                    const credits = String(row[colMap.credit] || '3').trim();
-
-                    if (!subjectMap.has(subKey)) {
-                        subjectMap.set(subKey, {
-                            code: code || 'TBD',
-                            name,
-                            semester,
-                            type: name.toLowerCase().includes('lab') ? 'Lab' : 'Lecture',
-                            credits: (credits === '0' || !credits) ? '3' : credits
-                        });
-                    }
-
-                    if (colMap.secCols) {
-                        colMap.secCols.forEach(sec => {
-                            let teacherInitial = String(row[sec.col] || '').trim().toUpperCase();
-                            // Skip common placeholders or empty values
-                            if (!teacherInitial || teacherInitial === '0' || teacherInitial === '-' || teacherInitial === 'NIL') return;
-
-                            // STRICT HEURISTIC: Teacher initials are short (e.g., "NU", "DR.NS"). 
-                            // In PSNA format, codes like "I ME CP1242" in elective rows are NOT teachers.
-                            // We set a hard limit of 10 characters for valid initials.
-                            if (teacherInitial.length > 10) return;
-
-                            const faculty = facultyMap.get(teacherInitial) || { name: teacherInitial, department: 'CSE' };
-
-                            // Safety: if the "name" still looks like a subject code
-                            if (/^[A-Z]{2,4}[0-9]{4}/.test(faculty.name) && faculty.name.length > 10) return;
-
-                            assignments.push({
-                                name: faculty.name.trim(),
-                                department: faculty.department,
-                                subject: `${code || 'TBD'} - ${name}`,
-                                semester: semester,
-                                assignedClass: `Section ${sec.id}`,
-                                initial: teacherInitial
+                        if (!globalSubjectMap.has(subKey)) {
+                            globalSubjectMap.set(subKey, {
+                                code: code || 'TBD',
+                                name,
+                                semester,
+                                type: name.toLowerCase().includes('lab') ? 'Lab' : 'Lecture',
+                                credits: (credits === '0' || !credits) ? '3' : credits
                             });
-                        });
+                        }
+
+                        if (colMap.secCols) {
+                            colMap.secCols.forEach(sec => {
+                                let teacherInitial = String(row[sec.col] || '').trim().toUpperCase();
+                                if (!teacherInitial || teacherInitial === '0' || teacherInitial === '-' || teacherInitial === 'NIL') return;
+                                if (teacherInitial.length > 10) return;
+
+                                const faculty = facultyMap.get(teacherInitial) || { name: teacherInitial, department: 'CSE' };
+                                if (/^[A-Z]{2,4}[0-9]{4}/.test(faculty.name) && faculty.name.length > 10) return;
+
+                                assignments.push({
+                                    name: faculty.name.trim(),
+                                    department: faculty.department,
+                                    subject: `${code || 'TBD'} - ${name}`,
+                                    semester: semester,
+                                    assignedClass: `Section ${sec.id}`,
+                                    initial: teacherInitial
+                                });
+                            });
+                        }
                     }
                 }
-                subjects.push(...Array.from(subjectMap.values()));
-            }
+            });
         });
 
-        if (assignments.length === 0) {
-            headerErrors.push("Could not extract any assignments. Ensure the sheet has 'Subj Code & Name' and columns 'A', 'B', 'C', etc.");
+        if (assignments.length === 0 && globalSubjectMap.size === 0) {
+            headerErrors.push("Could not extract any data. Ensure the sheet follows the PSNA allocation format.");
         }
 
+        const finalSubjects = Array.from(globalSubjectMap.values());
         setPendingTeachers(assignments);
-        setPendingSubjects(subjects);
+        setPendingSubjects(finalSubjects);
         setValidationReport({
             validTeachers: assignments.length,
-            validSubjects: subjects.length,
+            validSubjects: finalSubjects.length,
             badRows: [],
             headerErrors: headerErrors,
             mode: 'PSNA Allocation Format (Enhanced)',
@@ -438,22 +401,43 @@ const DataImporter = () => {
     };
 
     const downloadSampleFile = () => {
-        const facultyData = [
-            ["Teacher Name", "Department", "Subject", "Class", "Room/Lab", "Alt Subject 1", "Alt Subject 2"]
+        const header = [
+            "S.No", "Sem. No", "Code", "Sem - Subj Code & Name", "No of section", "CREDIT", "A", "B", "C", "D", "E"
         ];
 
-        const subjectData = [
-            ["Subject Name", "Subject Code", "Type", "Credits", "Alt Code 1", "Alt Name 1", "Alt Code 2", "Alt Name 2"]
+        const theoryData = [
+            ["Theory Subjects", "", "", "", "", "", "", "", "", "", ""],
+            header,
+            ["1", "IV", "CS2411", "CS2411 Theory of Computation", "4", "3", "NU", "DS", "ND", "CS", ""],
+            ["2", "IV", "CS2C12", "CS2C12 Database Management Systems", "4", "3", "GM", "SSP", "SMR", "KU", ""],
+            ["", "", "", "", "", "", "", "", "", "", ""],
+            ["Laboratory Subjects", "", "", "", "", "", "", "", "", "", ""],
+            header,
+            ["1", "IV", "CS2481", "CS2481 Database Management Systems Laboratory", "4", "2", "GM", "SSP", "ND", "KU", ""]
         ];
 
         const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(theoryData);
+
+        // Add some styling hints (merges)
+        ws['!merges'] = [
+            { s: { r: 0, c: 0 }, e: { r: 0, c: 10 } }, // Theory Header
+            { s: { r: 5, c: 0 }, e: { r: 5, c: 10 } }  // Lab Header
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws, "Allocation");
+
+        // Faculty Map Sheet
+        const facultyData = [
+            ["Initial", "Name of Faculty"],
+            ["NU", "Dr.N.Uma"],
+            ["DS", "Mr.D.Suresh"],
+            ["ND", "Ms.N.Deepa"]
+        ];
         const wsFaculty = XLSX.utils.aoa_to_sheet(facultyData);
-        const wsSubjects = XLSX.utils.aoa_to_sheet(subjectData);
+        XLSX.utils.book_append_sheet(wb, wsFaculty, "Faculty Map");
 
-        XLSX.utils.book_append_sheet(wb, wsFaculty, "Faculty");
-        XLSX.utils.book_append_sheet(wb, wsSubjects, "Subjects");
-
-        XLSX.writeFile(wb, "Timetable_Template.xlsx");
+        XLSX.writeFile(wb, "PSNA_Timetable_Template.xlsx");
     };
 
     const finalizeImport = () => {
