@@ -262,11 +262,10 @@ const DataImporter = () => {
         setValidationStatus(headerErrors.length > 0 ? 'error' : 'success');
     };
 
-    // --- STRICT MODE: Flat Assignment File ---
+    // --- STRICT MODE: Flat Assignment File + Catalog Support ---
     const validateStrict = (sheets, sheetNames) => {
         let validTeachers = [];
         let extractedSubjects = new Map();
-        let badRows = [];
         let headerErrors = [];
         let validSheetFound = false;
 
@@ -277,109 +276,93 @@ const DataImporter = () => {
             if (!rows || rows.length === 0) continue;
 
             const headers = Object.keys(rows[0]);
-
             const findCol = (candidates) => headers.find(h => candidates.some(c => h.toLowerCase().trim() === c.toLowerCase() || h.toLowerCase().trim().includes(c.toLowerCase())));
 
             const map = {
-                name: findCol(['Teacher Name', 'Faculty Name', 'Name of the Teacher', 'Teacher']),
-                dept: findCol(['Department', 'Dept', 'Branch']),
-                subject: findCol(['Subject Code', 'Subject Name', 'Subject', 'Course', 'Paper']),
+                name: findCol(['Teacher Name', 'Faculty Name', 'Name of the Teacher', 'Teacher', 'Staff Name']),
+                dept: findCol(['Department', 'Dept', 'Branch', 'Dept Name']),
+                subject: findCol(['Subject Code', 'Subject Name', 'Subject', 'Course', 'Paper', 'Course Name']),
                 class: findCol(['Class', 'Assigned Class', 'Year/Sec', 'Section', 'Year', 'Sem']),
                 credit: findCol(['Credit', 'Credits', 'Unit', 'Hrs', 'Session']),
+                type: findCol(['Type', 'Category', 'Lab/Theory']),
                 room: findCol(['Room', 'Lab', 'Venue', 'Location', 'Place']),
-                alt1: findCol(['Alt Subject 1', 'Alternative 1', 'Secondary Subject']),
+                alt1: findCol(['Alt Subject 1', 'Alternative 1']),
                 alt2: findCol(['Alt Subject 2', 'Alternative 2']),
                 alt3: findCol(['Alt Subject 3', 'Alternative 3'])
             };
 
-            if (map.name) {
+            // Process if it looks like EITHER a Teacher Assignment sheet OR a Subject Catalog sheet
+            if (map.name || map.subject) {
                 validSheetFound = true;
-                const missing = [];
-                if (!map.name) missing.push("Teacher Name");
-                if (!map.dept) missing.push("Department");
-                if (!map.subject) missing.push("Subject");
-                if (!map.class) missing.push("Class");
-
-                if (missing.length > 0) {
-                    const otherSheetHasSubject = sheetKeys.some(s => s !== sheetName && sheets[s][0] && Object.keys(sheets[s][0]).some(k => k.toLowerCase().includes('subject')));
-                    if (otherSheetHasSubject && missing.includes("Subject")) {
-                        headerErrors.push(`Multi-sheet file detected. Found Teacher Name in '${sheetName}' but Subject data seems to be in another sheet.`);
-                        headerErrors.push(`Strict Mode requires a single "Flat" sheet with all columns: Teacher, Dept, Subject, Class.`);
-                        headerErrors.push(`Suggestion: Switch to 'Master Data' mode.`);
-                    } else {
-                        headerErrors.push(`Sheet '${sheetName}' is missing required columns: ${missing.join(', ')}.`);
-                    }
-                    continue;
-                }
 
                 rows.forEach((row, idx) => {
-                    const rowNum = idx + 2;
-                    const nameRaw = row[map.name] ? String(row[map.name]).trim() : '';
-                    // Clean teacher name (remove "Assistant Professor", designation, etc)
-                    const name = nameRaw.split(/(Assistant|Associate|Professor|AP|ASP|HOD)/i)[0].replace(/[,.]\s*$/, '').trim();
-
-                    const dept = row[map.dept] ? String(row[map.dept]).trim() : 'General';
-                    const subRaw = row[map.subject] ? String(row[map.subject]).trim() : '';
-                    const classRaw = row[map.class] ? String(row[map.class]).trim() : '';
-                    const credRaw = map.credit ? String(row[map.credit]).trim() : '3';
-
-                    if (!name || name.toLowerCase().includes('teacher') || name.toLowerCase().includes('faculty')) return;
-
-                    let finalClass = classRaw || 'Unassigned';
-                    if (classRaw) {
-                        const strClass = classRaw.toUpperCase();
-                        // Support various formats like "VI CSE A", "III CS B", "Section A"
-                        const yearMatch = strClass.match(/\b(I|II|III|IV|V|VI|VII|VIII|1|2|3|4|5|6|7|8)\b/i);
-                        const secMatch = strClass.match(/\b(A|B|C|D|E)\b/i);
-                        const normY = (y) => {
-                            if (['I', '1'].includes(y)) return '1';
-                            if (['II', '2'].includes(y)) return '2';
-                            if (['III', 'VI', '3', '6'].includes(y)) return '3';
-                            if (['IV', 'VIII', '4', '8'].includes(y)) return '4';
-                            return y;
-                        };
-                        if (secMatch) {
-                            const year = yearMatch ? normY(yearMatch[0]) : '1';
-                            finalClass = `Year ${year} - Section ${secMatch[0]}`;
-                        }
-                    }
-
-                    if (subRaw) {
-                        // Extract code (e.g., CS2414) and name
-                        let cleanSub = subRaw.replace(/^(I|II|III|IV|V|VI|VII|VIII)\s+/i, '').trim();
-                        const codeMatch = cleanSub.match(/^([A-Z]{2,4}[0-9]{3,4})/i);
+                    // 1. Process Subject Data (Global across all sheets)
+                    const subRaw = map.subject ? String(row[map.subject] || '').trim() : '';
+                    if (subRaw && !subRaw.toLowerCase().includes('subject') && subRaw.length > 2) {
+                        let cleanSubRaw = subRaw.replace(/^(I|II|III|IV|V|VI|VII|VIII)\s+/i, '').trim();
+                        const codeMatch = cleanSubRaw.match(/^([A-Z]{2,4}[0-9]{3,4})/i);
                         const code = codeMatch ? codeMatch[1].toUpperCase() : 'TBD';
-                        let subName = cleanSub.replace(code, '').replace(/^[\s\-\.]+/, '').replace(/\(IL\)$/i, '').trim();
+                        let subName = cleanSubRaw.replace(code, '').replace(/^[\s\-\.]+/, '').replace(/\(IL\)$/i, '').trim();
 
-                        // Use a composite key for de-duplication to be safe
                         const subId = code !== 'TBD' ? code : subName.toUpperCase();
+                        const credRaw = map.credit ? String(row[map.credit] || '').trim() : '3';
+                        const typeRaw = map.type ? String(row[map.type] || '').trim() : '';
 
                         if (!extractedSubjects.has(subId)) {
                             extractedSubjects.set(subId, {
                                 id: subId,
                                 code: code,
-                                name: subName || cleanSub,
-                                type: cleanSub.toLowerCase().includes('lab') ? 'Lab' : 'Lecture',
+                                name: subName || cleanSubRaw,
+                                type: (typeRaw.toLowerCase().includes('lab') || cleanSubRaw.toLowerCase().includes('lab')) ? 'Lab' : 'Lecture',
                                 credits: isNaN(parseInt(credRaw)) ? '3' : credRaw
                             });
                         }
 
-                        validTeachers.push({
-                            id: `T-${validTeachers.length}-${Math.random().toString(36).substr(2, 5)}`,
-                            name: name,
-                            department: dept,
-                            subject: `${code} - ${subName || cleanSub}`,
-                            assignedClass: finalClass,
-                            alternatives: [row[map.alt1], row[map.alt2], row[map.alt3]].filter(Boolean).map(a => String(a).trim())
-                        });
+                        // 2. Process Teacher Assignment (If name column exists in this sheet)
+                        const nameRaw = map.name ? String(row[map.name] || '').trim() : '';
+                        if (nameRaw && nameRaw.length > 2 && !nameRaw.toLowerCase().includes('name')) {
+                            const name = nameRaw.split(/(Assistant|Associate|Professor|AP|ASP|HOD)/i)[0].replace(/[,.]\s*$/, '').trim();
+                            const dept = map.dept ? String(row[map.dept] || '').trim() : 'General';
+                            const classRaw = map.class ? String(row[map.class] || '').trim() : '';
+
+                            let finalClass = classRaw || 'Unassigned';
+                            if (classRaw) {
+                                const strClass = classRaw.toUpperCase();
+                                const yearMatch = strClass.match(/\b(I|II|III|IV|V|VI|VII|VIII|1|2|3|4|5|6|7|8)\b/i);
+                                const secMatch = strClass.match(/\b(A|B|C|D|E)\b/i);
+                                const normY = (y) => {
+                                    if (['I', '1'].includes(y)) return '1';
+                                    if (['II', '2'].includes(y)) return '2';
+                                    if (['III', 'VI', '3', '6'].includes(y)) return '3';
+                                    if (['IV', 'VIII', '4', '8'].includes(y)) return '4';
+                                    return y;
+                                };
+                                if (secMatch) {
+                                    const year = yearMatch ? normY(yearMatch[0]) : '1';
+                                    finalClass = `Year ${year} - Section ${secMatch[0]}`;
+                                }
+                            }
+
+                            validTeachers.push({
+                                id: `T-${validTeachers.length}-${Math.random().toString(36).substr(2, 5)}`,
+                                name: name,
+                                department: dept,
+                                subject: `${code} - ${subName || cleanSubRaw}`,
+                                assignedClass: finalClass,
+                                alternatives: [row[map.alt1], row[map.alt2], row[map.alt3]].filter(Boolean).map(a => String(a).trim())
+                            });
+                        }
                     }
                 });
-                // DO NOT break here, continue to next sheets
             }
         }
 
         if (!validSheetFound) {
-            headerErrors.push("Could not find any sheet with a 'Teacher Name' column.");
+            headerErrors.push("Could not find any sheets containing 'Teacher Name' or 'Subject' data.");
+        }
+
+        if (validTeachers.length === 0 && extractedSubjects.size === 0) {
+            headerErrors.push("No valid data rows found in the detected sheets.");
         }
 
         setPendingTeachers(validTeachers);
@@ -387,15 +370,15 @@ const DataImporter = () => {
         setValidationReport({
             validTeachers: validTeachers.length,
             validSubjects: extractedSubjects.size,
-            badRows: badRows,
+            badRows: [],
             headerErrors: headerErrors,
-            mode: 'Strict Assignment',
+            mode: 'Strict Assignment (Multi-Sheet)',
             preview: validTeachers.slice(0, 3)
         });
-        setValidationStatus((headerErrors.length > 0 || (badRows.length === rows?.length && rows?.length > 0)) ? 'error' : 'success');
+        setValidationStatus(headerErrors.length > 0 ? 'error' : 'success');
     };
 
-    // --- MASTER MODE ---
+    // --- MASTER MODE (Legacy/Fuzzy) ---
     const validateMaster = (sheets) => {
         let teachersFound = [];
         let subjectsFound = [];
