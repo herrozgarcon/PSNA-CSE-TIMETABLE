@@ -20,8 +20,9 @@ const Subjects = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [filterSem, setFilterSem] = useState('All');
     const [filterType, setFilterType] = useState('All');
+    const [isEditing, setIsEditing] = useState(false);
 
-    const filteredSubjects = subjects.filter(sub => {
+    const filteredSubjects = (subjects || []).filter(sub => {
         const matchesSearch = (sub.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             sub.code?.toLowerCase().includes(searchTerm.toLowerCase()));
         const matchesSem = filterSem === 'All' || sub.semester === filterSem;
