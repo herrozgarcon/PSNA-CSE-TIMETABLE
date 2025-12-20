@@ -38,11 +38,17 @@ export const generateClassTimetable = (
             });
         } else {
             for (let i = 0; i < sessionCount; i++) {
+                const isZeroCredit = credits === 0;
+                // NEW RULE: 0 credit subject should have 1 period on Saturday
+                const shouldForceSaturday = isZeroCredit && i === 0;
+
                 slotPool.push({
                     ...assign,
                     poolId: `${assign.subject.code}-${i}`,
                     isLab: false,
-                    duration: 1
+                    duration: 1,
+                    forceDay: shouldForceSaturday ? 'Saturday' : undefined,
+                    isZeroCredit: isZeroCredit
                 });
             }
         }
@@ -150,8 +156,9 @@ export const generateClassTimetable = (
             for (const tIdx of timeIndices) {
                 if (tIdx > times.length - slot.duration) continue;
 
-                // NEW CONSTRAINT: Editable subject should not come at 1st period (index 0)
-                if (subCode === 'EDITABLE' && tIdx === 0) continue;
+                // NEW CONSTRAINT: Editable or 0-credit subject should not come at 1st period (index 0)
+                // especially on Saturday as requested.
+                if ((subCode === 'EDITABLE' || slot.isZeroCredit) && tIdx === 0) continue;
 
                 // NEW CONSTRAINT: Lab periods should not start at 4th period (index 3)
                 if (slot.isLab && tIdx === 3) continue;
