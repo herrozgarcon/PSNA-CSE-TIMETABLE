@@ -285,6 +285,7 @@ const DataImporter = () => {
                 dept: findCol(['Department', 'Dept', 'Branch']),
                 subject: findCol(['Subject Code', 'Subject Name', 'Subject', 'Course', 'Paper']),
                 class: findCol(['Class', 'Assigned Class', 'Year/Sec', 'Section', 'Year', 'Sem']),
+                credit: findCol(['Credit', 'Credits', 'Unit', 'Hrs', 'Session']),
                 room: findCol(['Room', 'Lab', 'Venue', 'Location', 'Place']),
                 alt1: findCol(['Alt Subject 1', 'Alternative 1', 'Secondary Subject']),
                 alt2: findCol(['Alt Subject 2', 'Alternative 2']),
@@ -313,42 +314,67 @@ const DataImporter = () => {
 
                 rows.forEach((row, idx) => {
                     const rowNum = idx + 2;
-                    const name = row[map.name] ? String(row[map.name]).trim() : '';
+                    const nameRaw = row[map.name] ? String(row[map.name]).trim() : '';
+                    // Clean teacher name (remove "Assistant Professor", designation, etc)
+                    const name = nameRaw.split(/(Assistant|Associate|Professor|AP|ASP|HOD)/i)[0].replace(/[,.]\s*$/, '').trim();
+
                     const dept = row[map.dept] ? String(row[map.dept]).trim() : 'General';
-                    const subCodeRaw = row[map.subject] ? String(row[map.subject]).trim() : '';
+                    const subRaw = row[map.subject] ? String(row[map.subject]).trim() : '';
                     const classRaw = row[map.class] ? String(row[map.class]).trim() : '';
+                    const credRaw = map.credit ? String(row[map.credit]).trim() : '3';
 
-                    if (!name) {
-                        badRows.push({ row: rowNum, missing: "Teacher Name" });
-                    } else {
-                        let finalClass = classRaw || 'Unassigned';
-                        if (classRaw) {
-                            const strClass = classRaw.toUpperCase();
-                            const yearMatch = strClass.match(/\b([1-4]|I{1,3}V?|1ST|2ND|3RD|4TH)\b/i);
-                            const secMatch = strClass.match(/\b([A-D])\b/i);
-                            const normY = (y) => ['I', '1ST', '1'].includes(y) ? '1' : (['II', '2ND', '2'].includes(y) ? '2' : (['III', '3RD', '3'].includes(y) ? '3' : '4'));
-                            if (yearMatch && secMatch) finalClass = `Year ${normY(yearMatch[0])} - Section ${secMatch[0]}`;
+                    if (!name || name.toLowerCase().includes('teacher') || name.toLowerCase().includes('faculty')) return;
+
+                    let finalClass = classRaw || 'Unassigned';
+                    if (classRaw) {
+                        const strClass = classRaw.toUpperCase();
+                        // Support various formats like "VI CSE A", "III CS B", "Section A"
+                        const yearMatch = strClass.match(/\b(I|II|III|IV|V|VI|VII|VIII|1|2|3|4|5|6|7|8)\b/i);
+                        const secMatch = strClass.match(/\b(A|B|C|D|E)\b/i);
+                        const normY = (y) => {
+                            if (['I', '1'].includes(y)) return '1';
+                            if (['II', '2'].includes(y)) return '2';
+                            if (['III', 'VI', '3', '6'].includes(y)) return '3';
+                            if (['IV', 'VIII', '4', '8'].includes(y)) return '4';
+                            return y;
+                        };
+                        if (secMatch) {
+                            const year = yearMatch ? normY(yearMatch[0]) : '1';
+                            finalClass = `Year ${year} - Section ${secMatch[0]}`;
                         }
+                    }
 
-                        if (subCodeRaw && !extractedSubjects.has(subCodeRaw)) {
-                            extractedSubjects.set(subCodeRaw, {
-                                code: subCodeRaw,
-                                name: subCodeRaw,
-                                type: subCodeRaw.toLowerCase().includes('lab') ? 'Lab' : 'Lecture',
-                                credits: '3'
+                    if (subRaw) {
+                        // Extract code (e.g., CS2414) and name
+                        let cleanSub = subRaw.replace(/^(I|II|III|IV|V|VI|VII|VIII)\s+/i, '').trim();
+                        const codeMatch = cleanSub.match(/^([A-Z]{2,4}[0-9]{3,4})/i);
+                        const code = codeMatch ? codeMatch[1].toUpperCase() : 'TBD';
+                        let subName = cleanSub.replace(code, '').replace(/^[\s\-\.]+/, '').replace(/\(IL\)$/i, '').trim();
+
+                        // Use a composite key for de-duplication to be safe
+                        const subId = code !== 'TBD' ? code : subName.toUpperCase();
+
+                        if (!extractedSubjects.has(subId)) {
+                            extractedSubjects.set(subId, {
+                                id: subId,
+                                code: code,
+                                name: subName || cleanSub,
+                                type: cleanSub.toLowerCase().includes('lab') ? 'Lab' : 'Lecture',
+                                credits: isNaN(parseInt(credRaw)) ? '3' : credRaw
                             });
                         }
 
                         validTeachers.push({
+                            id: `T-${validTeachers.length}-${Math.random().toString(36).substr(2, 5)}`,
                             name: name,
                             department: dept,
-                            subject: subCodeRaw || '-',
+                            subject: `${code} - ${subName || cleanSub}`,
                             assignedClass: finalClass,
                             alternatives: [row[map.alt1], row[map.alt2], row[map.alt3]].filter(Boolean).map(a => String(a).trim())
                         });
                     }
                 });
-                break;
+                // DO NOT break here, continue to next sheets
             }
         }
 
