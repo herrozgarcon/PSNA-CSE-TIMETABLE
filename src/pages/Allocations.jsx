@@ -23,13 +23,20 @@ const Allocations = () => {
     useEffect(() => {
         const newGrid = {};
         teachers.forEach(t => {
-            // Match subject code/name
-            const subjectMatch = subjects.find(s => `${s.code} - ${s.name}` === t.subject || s.code === t.subject);
+            if (!t.subject) return;
+            const tSub = String(t.subject).trim().toLowerCase();
+
+            // Match subject code/name with robust trimming
+            const subjectMatch = subjects.find(s => {
+                const sFull = `${s.code} - ${s.name}`.trim().toLowerCase();
+                const sCode = String(s.code).trim().toLowerCase();
+                return sFull === tSub || sCode === tSub;
+            });
+
             if (!subjectMatch) return;
 
             if (!newGrid[subjectMatch.id]) newGrid[subjectMatch.id] = {};
 
-            // Extract section from assignedClass (e.g., "Section A" or "Year 1 - Section A")
             const secMatch = t.assignedClass?.match(/Section ([A-E])/i);
             if (secMatch) {
                 const secId = secMatch[1].toUpperCase();

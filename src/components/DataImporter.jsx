@@ -96,25 +96,49 @@ const DataImporter = () => {
         // 1. Scan ALL sheets for Faculty Map (Initials -> Full Name)
         sheetKeys.forEach(name => {
             const rows = sheets[name];
+            if (!rows || rows.length === 0) return;
+
+            // Look for a table that has "Name of the faculty" and "Initials"
+            let initCol = null;
+            let nameCol = null;
+
+            // Try to find headers in the first 50 rows of each sheet
+            for (let i = 0; i < Math.min(rows.length, 50); i++) {
+                const row = rows[i];
+                Object.entries(row).forEach(([key, val]) => {
+                    const v = String(val).toLowerCase();
+                    if (v.includes('name') && v.includes('faculty')) nameCol = key;
+                    if (v.includes('initial')) initCol = key;
+                });
+
+                if (initCol && nameCol) {
+                    // Harvest from subsequent rows until break
+                    for (let j = i + 1; j < rows.length; j++) {
+                        const r = rows[j];
+                        const ini = String(r[initCol] || '').trim().toUpperCase();
+                        const full = String(r[nameCol] || '').trim();
+                        if (ini && full && ini.length <= 5 && full.length > 5) {
+                            facultyMap.set(ini, { name: full, department: 'CSE' });
+                        } else if (j > i + 5 && (!ini || !full)) {
+                            break; // Stop if we hit a gap
+                        }
+                    }
+                    break;
+                }
+            }
+
+            // Fallback: Fuzzy heuristic (if no clear headers found)
             rows.forEach(row => {
                 const values = Object.values(row).map(v => String(v).trim());
-                // Look for rows that look like: "Initial" | "Full Name" or "Name" | "Initials"
-                // Heuristic: two adjacent strings, one short (1-4 chars) one long
                 if (values.length >= 2) {
                     for (let i = 0; i < values.length - 1; i++) {
                         const v1 = values[i];
                         const v2 = values[i + 1];
-                        if (v1.length >= 2 && v1.length <= 4 && v2.length > 5 && !v2.includes(' ')) {
-                            // Likely Initial followed by some code? No, usually Initial | Full Name
-                        }
-                        // Looking for "NU" | "Dr. N. Umamaheswari"
-                        if ((v1.length >= 2 && v1.length <= 5 && v2.length > 5 && (v2.includes(' ') || v2.includes('.'))) ||
-                            (v2.length >= 2 && v2.length <= 5 && v1.length > 5 && (v1.includes(' ') || v1.includes('.')))) {
+                        if ((v1.length >= 2 && v1.length <= 5 && (v2.includes('Dr.') || v2.includes('Mr.') || v2.includes('Ms.'))) ||
+                            (v2.length >= 2 && v2.length <= 5 && (v1.includes('Dr.') || v1.includes('Mr.') || v1.includes('Ms.')))) {
                             const initial = v1.length <= 5 ? v1 : v2;
                             const fullName = v1.length > 5 ? v1 : v2;
-                            if (initial && fullName && !fullName.toLowerCase().includes('subject')) {
-                                facultyMap.set(initial.toUpperCase(), { name: fullName, department: 'CSE' });
-                            }
+                            facultyMap.set(initial.toUpperCase(), { name: fullName, department: 'CSE' });
                         }
                     }
                 }
@@ -159,8 +183,11 @@ const DataImporter = () => {
                     const rawFullName = row[colMap.fullName];
                     if (!rawFullName || String(rawFullName).toLowerCase().includes('total')) continue;
 
-                    const code = row[colMap.code] || (String(rawFullName).match(/^[A-Z0-9]+/i)?.[0] || 'UNK');
-                    const name = String(rawFullName).replace(code, '').trim();
+                    const code = (row[colMap.code] ? String(row[colMap.code]).trim() : (String(rawFullName).match(/^[A-Z0-9]+/i)?.[0] || 'UNK')).toUpperCase();
+                    let name = String(rawFullName).replace(code, '').trim();
+                    // Clean up potential leading dashes/dots from name
+                    if (name.startsWith('-') || name.startsWith('.')) name = name.substring(1).trim();
+
                     const semester = String(row[colMap.semester] || '').trim();
                     const credits = String(row[colMap.credit] || '3').trim();
 
@@ -169,25 +196,26 @@ const DataImporter = () => {
                             code,
                             name,
                             semester,
-                            type: String(name).toLowerCase().includes('lab') ? 'Lab' : 'Lecture',
+                            type: name.toLowerCase().includes('lab') ? 'Lab' : 'Lecture',
                             credits: (credits === '0' || !credits) ? '3' : credits
                         });
                     }
 
                     if (colMap.secCols) {
                         colMap.secCols.forEach(sec => {
-                            const teacherInitial = String(row[sec.col] || '').trim().toUpperCase();
-                            if (teacherInitial && teacherInitial !== '0' && teacherInitial !== '-') {
-                                const faculty = facultyMap.get(teacherInitial) || { name: teacherInitial, department: 'CSE' };
-                                assignments.push({
-                                    name: faculty.name,
-                                    department: faculty.department,
-                                    subject: `${code} - ${name}`,
-                                    semester: semester,
-                                    assignedClass: `Section ${sec.id}`,
-                                    initial: teacherInitial
-                                });
-                            }
+                            let teacherInitial = String(row[sec.col] || '').trim().toUpperCase();
+                            // Skip common placeholders or empty values
+                            if (!teacherInitial || teacherInitial === '0' || teacherInitial === '-' || teacherInitial === 'NIL') return;
+
+                            const faculty = facultyMap.get(teacherInitial) || { name: teacherInitial, department: 'CSE' };
+                            assignments.push({
+                                name: faculty.name,
+                                department: faculty.department,
+                                subject: `${code} - ${name}`,
+                                semester: semester,
+                                assignedClass: `Section ${sec.id}`,
+                                initial: teacherInitial
+                            });
                         });
                     }
                 }
