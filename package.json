@@ -1,5 +1,6 @@
 {
     "name": "psna-timetable-system",
+    "homepage": "https://herrozgarcon.github.io/PSNA-CSE-TIMETABLE/",
     "private": true,
     "version": "2.0.0",
     "type": "module",
