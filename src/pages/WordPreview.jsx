@@ -137,29 +137,51 @@ const WordPreview = () => {
         let currentColMap = null;
         let activeSection = null;
         const found = [];
+
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
             const rowStr = row.join(' ').toUpperCase();
-            const secMatch = rowStr.match(/(SECTION|SEC|CLASS)[:\s-]+([A-H])(\s|$)/i);
-            if (secMatch) activeSection = secMatch[2].toUpperCase();
-            if (rowStr.match(/8\.45|08\.45|8:45/)) {
+
+            // 1. Detect Section more robustly from Header Rows
+            // Matches: "Section: A", "Sec-A", "Class: III-A", "Year/Sec: III/A"
+            const secMatch = rowStr.match(/(?:SECTION|SEC|CLASS|YEAR\/SEC)[\s:.-]+(?:[IVX0-9]+[\s-]*\/[\s-]*)?([A-H])(?:\s|$|\)|\])/i);
+            if (secMatch) activeSection = secMatch[1].toUpperCase();
+
+            // 2. Detect Time Header Row (Look for typical start times or "Day" keyword combined with times)
+            // We look for at least 3 distinct time-like patterns to confirm it's a header
+            const timePatterns = [/8[:.]45/, /9[:.]40/, /10[:.]55/, /11[:.]45/, /1[:.]45/, /2[:.]35/, /3[:.]25/];
+            const timesFound = timePatterns.reduce((acc, regex) => acc + (rowStr.match(regex) ? 1 : 0), 0);
+
+            if (timesFound >= 3 || (rowStr.includes('DAY') && timesFound >= 1)) {
                 const map = {};
                 let lastSlot = -1;
                 row.forEach((text, idx) => {
-                    const t = String(text).trim();
+                    const t = String(text).trim().replace(/\s+/g, ''); // Remove spaces for easier matching
                     if (!t) return;
+
                     let slot = -1;
-                    if (t.match(/8\.45|08\.45|8:45/)) slot = 0;
-                    else if (t.match(/9\.40|09\.40|9:40/)) slot = 1;
-                    else if (t.match(/10\.55|10:55/)) slot = 2;
-                    else if (t.match(/11\.45|11:45/)) slot = 3;
-                    else if (t.match(/1\.45|01\.45|1:45|13\.45/)) slot = 4;
-                    else if (t.match(/2\.35|02\.35|2:35|14\.35/)) slot = 5;
-                    else if (t.match(/3\.25|03\.25|3:25|15\.25/)) slot = 6;
-                    if (slot !== -1 && slot !== lastSlot) { map[idx] = slot; lastSlot = slot; }
+                    // Extended matching for ranges and variations
+                    if (t.match(/8[:.]45/)) slot = 0;
+                    else if (t.match(/9[:.]40/)) slot = 1;
+                    else if (t.match(/10[:.]55/)) slot = 2; // P3 often starts here
+                    else if (t.match(/11[:.]45/)) slot = 3;
+                    else if (t.match(/1[:.]45|13[:.]45/)) slot = 4;
+                    else if (t.match(/2[:.]35|14[:.]35/)) slot = 5;
+                    else if (t.match(/3[:.]25|15[:.]25/)) slot = 6;
+
+                    // Allow simple P1, P2 headers if time parsing fails but Day is present? 
+                    // (Risk of false positives, sticky to time for now)
+
+                    if (slot !== -1 && slot !== lastSlot) {
+                        map[idx] = slot;
+                        lastSlot = slot;
+                    }
                 });
-                currentColMap = map; continue;
+                // Only adopt new map if it found meaningful slots
+                if (Object.keys(map).length > 2) currentColMap = map;
+                continue;
             }
+
             if (currentColMap) {
                 const dayText = String(row[0] || '').toUpperCase();
                 let dayIdx = -1;
@@ -169,18 +191,27 @@ const WordPreview = () => {
                 else if (dayText.includes('THU')) dayIdx = 3;
                 else if (dayText.includes('FRI')) dayIdx = 4;
                 else if (dayText.includes('SAT')) dayIdx = 5;
+
                 if (dayIdx !== -1) {
                     row.forEach((cellText, cIdx) => {
                         const slot = currentColMap[cIdx];
+                        // Also check column span - if cell spans multiple time columns, it might start at 'slot'
                         if (slot !== undefined && cellText && String(cellText).length > 2) {
-                            const codeRegex = /([A-Z]{2,5}\d{1,6})/gi;
+
+                            // Relaxed Code Regex: Allows 2-4 chars (CS, MAT) + separator? + digits
+                            // Capture complex codes like 19CS1234 too
+                            const codeRegex = /([A-Z]{2,5}\s?[-]?\s?\d{2,6})/gi;
                             let m;
                             while ((m = codeRegex.exec(cellText)) !== null) {
-                                const code = m[1].toUpperCase();
-                                const textAfter = cellText.substring(m.index + code.length, m.index + code.length + 10);
-                                // Stricter section match: Only if explicitly labeled like (A) or Sec: A
-                                const localSecMatch = textAfter.match(/(?:\((?:SEC\s*)?([A-H])\))|(?:\bSEC[:\s-]+([A-H])\b)/i);
-                                const sec = (localSecMatch ? (localSecMatch[1] || localSecMatch[2]) : activeSection)?.toUpperCase();
+                                const code = m[1].toUpperCase().replace(/\s/g, ''); // Normalize code
+                                const textAfter = cellText.substring(m.index + m[0].length);
+
+                                // Enhanced Section Local Detection
+                                // Matches: (A), (Sec A), -A, /A, [A]
+                                const localSecMatch = textAfter.match(/(?:^|[\s\-\/\[\(])(?:SEC\s*)?([A-H])(?:$|[\s\)\],])/i);
+
+                                const sec = (localSecMatch ? localSecMatch[1] : activeSection)?.toUpperCase();
+
                                 if (sec) {
                                     found.push({ code, sec, d: dayIdx, s: slot, text: cellText.trim() });
                                 }
