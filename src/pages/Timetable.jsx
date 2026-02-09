@@ -3,7 +3,6 @@ import { useData } from '../context/DataContext';
 import { generateClassTimetable, DAYS } from '../utils/TimetableGenerator';
 import { Printer, Play, Calendar, Clock, Layers, Save, FileSpreadsheet, Download, X, Lock, FileText } from 'lucide-react';
 import * as XLSX from 'xlsx';
-
 const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const getCleanLabCode = (c) => norm(c).replace(/_LAB|_\d+/g, '');
 const isLabNode = (cell) => {
@@ -16,7 +15,6 @@ const isLabNode = (cell) => {
     if (name.includes('LAB') || name.includes('PRACTICAL') || code.includes('LAB') || name.includes('PROJECT')) return true;
     return false;
 };
-
 const Timetable = () => {
     const { subjects, teachers, schedule, updateSchedule, facultyAccounts, department, timeSlots } = useData();
     const [semester, setSemester] = useState('');
@@ -24,19 +22,14 @@ const Timetable = () => {
     const [selectedSectionView, setSelectedSectionView] = useState('A');
     const [isGenerated, setIsGenerated] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
-
-    // Filter teaching slots to know how many columns the generator should create
     const teachingSlotsCount = timeSlots ? timeSlots.filter(s => s.type !== 'break').length : 7;
-
     const availableSemesters = Array.from(new Set(subjects.map(s => s.semester))).filter(Boolean).sort();
-
     useEffect(() => {
         const semesterList = Array.from(new Set(subjects.map(s => s.semester))).filter(Boolean).sort();
         if (semesterList.length > 0 && (!semester || !semesterList.includes(semester))) {
             setSemester(semesterList[0]);
         }
     }, [subjects, semester]);
-
     useEffect(() => {
         if (schedule && schedule[semester] && Object.keys(schedule[semester]).length > 0) {
             setGrids(schedule[semester]);
@@ -50,14 +43,12 @@ const Timetable = () => {
             setIsGenerated(false);
         }
     }, [semester, schedule]);
-
     const getSectionsForSemester = (sem) => {
         return Array.from(new Set(
             subjects.filter(s => s.semester === sem)
                 .flatMap(s => teachers.filter(t => t.subjectCode === s.code).map(t => t.section))
         )).filter(Boolean).sort();
     };
-
     const handleGenerate = () => {
         if (!subjects || subjects.length === 0) return;
         setIsGenerating(true);
@@ -67,23 +58,21 @@ const Timetable = () => {
                 const sectionsToGenerate = sections.length > 0 ? sections : ['A'];
                 const newGrids = {};
                 const globalReservedSlots = {};
-                const globalLabUsage = {}; // Track [Day-LabCode] used across sections
+                const globalLabUsage = {};
+                const globalFacultyLoad = {}; // { 'TEACHER_NAME': { 0: 2, 1: 3, ..., total: 15 } }
 
                 Object.keys(schedule).forEach(sem => {
-                    if (sem === semester) return;
                     const semGrids = schedule[sem] || {};
                     Object.values(semGrids).forEach(grid => {
                         if (grid && Array.isArray(grid)) {
                             grid.forEach((dayRow, d) => {
                                 dayRow.forEach((cell, s) => {
-                                    if (cell) {
-                                        const key = `${d}-${s}`;
-                                        if (!globalReservedSlots[key]) globalReservedSlots[key] = new Set();
-                                        if (cell.teacherName && cell.teacherName !== 'TBA') globalReservedSlots[key].add(cell.teacherName.toUpperCase());
-                                        if (isLabNode(cell) && cell.isStart) globalReservedSlots[key].add('LAB_START');
-
-                                        // Track existing labs for this semester logic if needed, 
-                                        // but usually we strictly isolate by section generation order.
+                                    if (cell && cell.teacherName && cell.teacherName !== 'TBA') {
+                                        const tName = cell.teacherName.toUpperCase();
+                                        if (!globalFacultyLoad[tName]) globalFacultyLoad[tName] = { total: 0 };
+                                        if (!globalFacultyLoad[tName][d]) globalFacultyLoad[tName][d] = 0;
+                                        globalFacultyLoad[tName][d]++; // Increment duration
+                                        globalFacultyLoad[tName].total++;
                                     }
                                 });
                             });
@@ -93,71 +82,50 @@ const Timetable = () => {
 
                 let syncElectives = {};
                 sectionsToGenerate.forEach(section => {
-                    // 1. Map basic details first
                     const mappedSubjects = subjects.filter(s => s.semester === semester).map(sub => {
                         const teacher = teachers.find(t => t.subjectCode === sub.code && t.section === section);
                         return { ...sub, teacherName: teacher ? teacher.name : 'TBA' };
                     });
-
-                    // 2. Group Electives
                     const finalSubjects = [];
-                    const electiveGroups = {}; // Key -> [subjects]
-
+                    const electiveGroups = {};
                     mappedSubjects.forEach(sub => {
                         const nameUpper = sub.name.toUpperCase();
                         const isElective = (sub.type === 'Elective') || nameUpper.includes('ELECTIVE');
-
                         if (isElective) {
-                            // Determine Group Key (e.g. "OPEN ELECTIVE - I", "PROFESSIONAL ELECTIVE - III")
-                            // Capture Prefix (Group 1), Numeral (Group 2), Star (Group 3)
                             const match = nameUpper.match(/(OPEN|PROFESSIONAL|FREE|DEPT|DEPARTMENT)?[\s-]*ELECTIVE[\s-–—]*(I{1,3}|IV|V|VI|VII|VIII)\s*(\*?)/);
-
-                            // Normalize key
-                            // If Prefix exists, include it. e.g. "OPEN ELECTIVE - III"
-                            // If no prefix, just "ELECTIVE - III"
                             const prefix = match && match[1] ? match[1] + ' ' : '';
                             const numeral = match ? match[2] : '';
                             const star = match ? match[3] || '' : '';
-
                             const groupKey = match ? `${prefix}ELECTIVE - ${numeral}${star}` : (sub.type === 'Elective' ? 'GeneralElective' : null);
-
                             if (groupKey) {
                                 if (!electiveGroups[groupKey]) electiveGroups[groupKey] = [];
                                 electiveGroups[groupKey].push(sub);
                             } else {
-                                finalSubjects.push(sub); // Treat as standalone if no clear grouping
+                                finalSubjects.push(sub);
                             }
                         } else {
                             finalSubjects.push(sub);
                         }
                     });
-
-                    // 3. Merge Groups
                     Object.values(electiveGroups).forEach(group => {
                         if (group.length === 1) {
                             finalSubjects.push(group[0]);
                         } else if (group.length > 1) {
-                            // Create Combo Subject
                             const merged = { ...group[0] };
                             merged.code = group.map(s => s.code).join(' / ');
-                            // merged.name = group.map(s => s.name).join(' / '); // Names might get too long, maybe rely on Code
                             merged.teacherName = group.map(s => s.teacherName).join('/');
                             merged.credit = Math.max(...group.map(s => parseInt(s.credit) || 0));
                             merged.satCount = Math.max(...group.map(s => parseInt(s.satCount) || 0));
-
-                            // Ensure it's treated as explicit elective
                             merged.type = 'Elective';
 
                             finalSubjects.push(merged);
                         }
                     });
-
                     const sectionSubjects = finalSubjects;
 
-                    // Pass globalLabUsage to generator
-                    // PASS teachingSlotsCount to generator
-                    let sectionGrid = generateClassTimetable(semester, section, sectionSubjects, globalReservedSlots, syncElectives, false, globalLabUsage, teachingSlotsCount);
-                    if (!sectionGrid) sectionGrid = generateClassTimetable(semester, section, sectionSubjects, globalReservedSlots, syncElectives, true, globalLabUsage, teachingSlotsCount);
+                    // Pass globalFacultyLoad to generator
+                    let sectionGrid = generateClassTimetable(semester, section, sectionSubjects, globalReservedSlots, syncElectives, false, globalLabUsage, teachingSlotsCount, globalFacultyLoad);
+                    if (!sectionGrid) sectionGrid = generateClassTimetable(semester, section, sectionSubjects, globalReservedSlots, syncElectives, true, globalLabUsage, teachingSlotsCount, globalFacultyLoad);
 
                     if (sectionGrid) {
                         newGrids[section] = sectionGrid;
@@ -166,10 +134,17 @@ const Timetable = () => {
                                 if (cell) {
                                     const key = `${d}-${s}`;
                                     if (!globalReservedSlots[key]) globalReservedSlots[key] = new Set();
-                                    if (cell.teacherName && cell.teacherName !== 'TBA') globalReservedSlots[key].add(cell.teacherName.toUpperCase());
-                                    if (isLabNode(cell) && cell.isStart) globalReservedSlots[key].add('LAB_START');
+                                    if (cell.teacherName && cell.teacherName !== 'TBA') {
+                                        const tName = cell.teacherName.toUpperCase();
+                                        globalReservedSlots[key].add(tName);
 
-                                    // Update Global Lab Usage for next sections
+                                        // Update Load after generation for next section usage
+                                        if (!globalFacultyLoad[tName]) globalFacultyLoad[tName] = { total: 0 };
+                                        if (!globalFacultyLoad[tName][d]) globalFacultyLoad[tName][d] = 0;
+                                        globalFacultyLoad[tName][d]++;
+                                        globalFacultyLoad[tName].total++;
+                                    }
+                                    if (isLabNode(cell) && cell.isStart) globalReservedSlots[key].add('LAB_START');
                                     if (cell.isLab) {
                                         globalLabUsage[`${d}-${cell.code}`] = true;
                                     }
@@ -178,7 +153,6 @@ const Timetable = () => {
                         });
                     }
                 });
-
                 if (Object.keys(newGrids).length > 0) {
                     updateSchedule(semester, newGrids);
                     setGrids(newGrids);
@@ -191,12 +165,10 @@ const Timetable = () => {
             }
         }, 500);
     };
-
     const [editingCell, setEditingCell] = useState(null);
     const [editValue, setEditValue] = useState('');
     const [isSemDropdownOpen, setIsSemDropdownOpen] = useState(false);
     const dropdownRef = React.useRef(null);
-
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -206,12 +178,10 @@ const Timetable = () => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
-
     const handleCellClick = (dIdx, sIdx, cell) => {
         setEditingCell({ day: dIdx, slot: sIdx, section: selectedSectionView, cell });
         setEditValue(cell ? cell.code : '');
     };
-
     const handleSaveEdit = () => {
         if (!editingCell) return;
         const { day, slot, section } = editingCell;
@@ -231,7 +201,6 @@ const Timetable = () => {
         setGrids(newGrids);
         setEditingCell(null);
     };
-
     const handleExportExcel = () => {
         if (!grids[selectedSectionView]) return;
         const currentGrid = grids[selectedSectionView];
@@ -256,12 +225,9 @@ const Timetable = () => {
         XLSX.utils.book_append_sheet(wb, ws, "Timetable");
         XLSX.writeFile(wb, `Timetable_${semester}_${selectedSectionView}.xlsx`);
     };
-
     const handleExportWord = () => {
-        // We can use the existing print-preview HTML content for Word
         const printContent = document.querySelector('.print-container');
         if (!printContent) return;
-
         const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' " +
             "xmlns:w='urn:schemas-microsoft-com:office:word' " +
             "xmlns='http://www.w3.org/TR/REC-html40'>" +
@@ -272,7 +238,6 @@ const Timetable = () => {
             "</style></head><body>";
         const footer = "</body></html>";
         const html = header + printContent.innerHTML + footer;
-
         const blob = new Blob(['\ufeff', html], {
             type: 'application/msword'
         });
@@ -284,7 +249,6 @@ const Timetable = () => {
         link.click();
         document.body.removeChild(link);
     };
-
     return (
         <div className="timetable-page">
             <style>{`
@@ -293,7 +257,6 @@ const Timetable = () => {
                     background: #f1f5f9; 
                     min-height: 100vh;
                 }
-
                 .header-card { 
                     background: #0f172a; 
                     border-radius: 20px; 
@@ -308,7 +271,6 @@ const Timetable = () => {
                     position: relative;
                     z-index: 100;
                 }
-
                 .header-card::before {
                     content: '';
                     position: absolute;
@@ -320,13 +282,10 @@ const Timetable = () => {
                     transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
                     z-index: -1;
                 }
-
                 .header-card:hover::before {
                     width: 100%;
                 }
-                
                 .header-info { display: flex; align-items: center; gap: 1.25rem; z-index: 2; }
-                
                 .header-icon { 
                     background: linear-gradient(135deg, #4f46e5, #8b5cf6); 
                     padding: 0.8rem; 
@@ -338,22 +297,16 @@ const Timetable = () => {
                     transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
                     z-index: 2;
                 }
-
                 .header-card:hover .header-icon {
                     transform: rotate(12deg) scale(1.1);
                 }
-                
                 .header-text h2 { margin: 0; font-weight: 800; font-size: 1.4rem; letter-spacing: -0.01em; }
                 .header-text p { margin: 2px 0 0; font-size: 0.75rem; opacity: 0.6; font-weight: 500; }
-                
                 .header-actions { display: flex; align-items: center; gap: 0.75rem; z-index: 2; }
-                
-                /* Custom Dropdown Styles */
                 .custom-select-container {
                     position: relative;
                     min-width: 150px;
                 }
-
                 .custom-select-trigger {
                     display: flex;
                     align-items: center;
@@ -365,11 +318,9 @@ const Timetable = () => {
                     font-size: 0.85rem;
                     transition: all 0.2s;
                 }
-
                 .custom-select-trigger:hover {
                     background: rgba(255,255,255,0.2) !important;
                 }
-
                 .custom-select-menu {
                     position: absolute;
                     top: calc(100% + 8px);
@@ -384,12 +335,10 @@ const Timetable = () => {
                     max-height: 250px;
                     overflow-y: auto;
                 }
-
                 @keyframes dropdownFade {
                     from { opacity: 0; transform: translateY(-10px); }
                     to { opacity: 1; transform: translateY(0); }
                 }
-
                 .custom-select-item {
                     padding: 10px 15px;
                     border-radius: 8px;
@@ -399,17 +348,14 @@ const Timetable = () => {
                     cursor: pointer;
                     transition: all 0.2s;
                 }
-
                 .custom-select-item:hover {
                     background: #f1f5f9;
                     color: #3b82f6;
                 }
-
                 .custom-select-item.selected {
                     background: #3b82f6;
                     color: white;
                 }
-
                 .btn-gen { 
                     background: #3b82f6; 
                     color: white; 
@@ -424,15 +370,12 @@ const Timetable = () => {
                     cursor: pointer; 
                     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 }
-                
                 .btn-gen:hover { 
                     background: #2563eb; 
                     transform: translateY(-2px);
                     box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
                 }
-
                 .btn-gen:active { transform: translateY(0); }
-
                 .icon-btn { 
                     background: white; 
                     border: none; 
@@ -445,9 +388,7 @@ const Timetable = () => {
                     justify-content: center; 
                     transition: all 0.2s;
                 }
-
                 .icon-btn:hover { background: #f1f5f9; transform: scale(1.1); }
-
                 .btn-print {
                     background: white;
                     color: #0f172a;
@@ -462,12 +403,8 @@ const Timetable = () => {
                     cursor: pointer;
                     transition: all 0.2s;
                 }
-
                 .btn-print:hover { background: #f8fafc; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-
-                /* Section Tabs - PILLS */
                 .tabs-container { display: flex; gap: 10px; margin-bottom: 2rem; animation: fadeIn 0.8s ease-out; }
-                
                 .tab-btn { 
                     background: white; 
                     border: none; 
@@ -479,15 +416,12 @@ const Timetable = () => {
                     cursor: pointer; 
                     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 }
-                
                 .tab-btn.active { 
                     background: #3b82f6; 
                     color: white; 
                     box-shadow: 0 8px 15px rgba(59, 130, 246, 0.3); 
                     transform: scale(1.05);
                 }
-
-                /* Timetable Grid */
                 .table-glass { 
                     background: white; 
                     border-radius: 24px; 
@@ -728,106 +662,226 @@ const Timetable = () => {
             </div>
 
             {grids[selectedSectionView] ? (
-                <div className="table-glass">
-                    <table className="grid-table">
-                        <thead>
-                            <tr>
-                                <th style={{ width: '110px', textAlign: 'left' }}>DAY</th>
-                                {timeSlots && timeSlots.map((slot, index) => {
-                                    if (slot.type === 'break') {
+                <>
+                    <div className="table-glass">
+                        <table className="grid-table">
+                            <thead>
+                                <tr>
+                                    <th style={{ width: '110px', textAlign: 'left' }}>DAY</th>
+                                    {timeSlots && timeSlots.map((slot, index) => {
+                                        if (slot.type === 'break') {
+                                            return (
+                                                <th key={slot.id} className="divider-col">
+                                                    <div className="vertical-label" style={{ height: '40px', opacity: 0.5, fontSize: '0.5rem' }}>
+                                                        {slot.label}
+                                                    </div>
+                                                </th>
+                                            );
+                                        }
                                         return (
-                                            <th key={slot.id} className="divider-col">
-                                                <div className="vertical-label" style={{ height: '40px', opacity: 0.5, fontSize: '0.5rem' }}>
-                                                    {slot.label}
-                                                </div>
+                                            <th key={slot.id}>
+                                                {slot.label}
+                                                <span style={{ fontSize: '0.65rem', display: 'block', marginTop: '2px', opacity: 0.8 }}>
+                                                    {(() => {
+                                                        const format = (t) => {
+                                                            if (!t) return '';
+                                                            const [h, m] = t.split(':');
+                                                            const hr = parseInt(h, 10);
+                                                            const amp = hr >= 12 ? 'PM' : 'AM';
+                                                            const hr12 = hr % 12 || 12;
+                                                            return `${hr12}:${m} ${amp}`;
+                                                        };
+                                                        return `${format(slot.startTime)} - ${format(slot.endTime)}`;
+                                                    })()}
+                                                </span>
                                             </th>
                                         );
-                                    }
+                                    })}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {DAYS.map((day, dIdx) => {
+                                    let teachingSlotIndex = 0;
                                     return (
-                                        <th key={slot.id}>
-                                            {slot.label}
-                                            <span style={{ fontSize: '0.65rem', display: 'block', marginTop: '2px', opacity: 0.8 }}>
-                                                {(() => {
-                                                    const format = (t) => {
-                                                        if (!t) return '';
-                                                        const [h, m] = t.split(':');
-                                                        const hr = parseInt(h, 10);
-                                                        const amp = hr >= 12 ? 'PM' : 'AM';
-                                                        const hr12 = hr % 12 || 12;
-                                                        return `${hr12}:${m} ${amp}`;
-                                                    };
-                                                    return `${format(slot.startTime)} - ${format(slot.endTime)}`;
-                                                })()}
-                                            </span>
-                                        </th>
-                                    );
-                                })}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {DAYS.map((day, dIdx) => {
-                                let teachingSlotIndex = 0;
-                                return (
-                                    <tr key={day}>
-                                        <td className="day-label">{day}</td>
-                                        {timeSlots && timeSlots.map((slot, sIdx) => {
-                                            if (slot.type === 'break') {
+                                        <tr key={day}>
+                                            <td className="day-label">{day}</td>
+                                            {timeSlots && timeSlots.map((slot, sIdx) => {
+                                                if (slot.type === 'break') {
+                                                    return (
+                                                        <td key={`brk-${dIdx}-${sIdx}`} className="divider-col">
+                                                            <div className="vertical-label">{slot.label}</div>
+                                                        </td>
+                                                    );
+                                                }
+
+                                                // Access the grid for this teaching slot
+                                                const cell = grids[selectedSectionView][dIdx] ? grids[selectedSectionView][dIdx][teachingSlotIndex] : null;
+                                                teachingSlotIndex++;
+
+                                                const isLab = isLabNode(cell);
+                                                const isInt = cell && (String(cell.type || '').toUpperCase().includes('INTEGRATED') || String(cell.name || '').toUpperCase().includes('INTEGRATED') || String(cell.name || '').toUpperCase().includes('GRAPHICS'));
+
+                                                const isIntLab = isInt && cell && cell.isLab;
+                                                const isNormalLab = isLab && !isInt;
+                                                const shouldShowGreen = isNormalLab || isIntLab;
+
+                                                const isActuallyLab = isLab && !isInt;
+                                                const showDashed = isActuallyLab && cell && cell.isFixedFromWord;
+
+                                                // Correction for grid index in click handler: we must pass the teachingSlotIndex - 1 (since we just incremented it)
+                                                const currentGridIndex = teachingSlotIndex - 1;
+
                                                 return (
-                                                    <td key={`brk-${dIdx}-${sIdx}`} className="divider-col">
-                                                        <div className="vertical-label">{slot.label}</div>
+                                                    <td key={`${dIdx}-${sIdx}`} className="cell-container">
+                                                        <div
+                                                            className={`subject-card ${shouldShowGreen ? 'lab-box' : ''} ${showDashed ? 'lab-locked' : ''}`}
+                                                            onClick={() => handleCellClick(dIdx, currentGridIndex, cell)}
+                                                        >
+                                                            {cell ? (
+                                                                <>
+                                                                    {cell.isFixedFromWord && <Lock className="lock-icon" size={12} style={{ color: shouldShowGreen ? '#15803d' : '#4f46e5', opacity: 0.6 }} />}
+                                                                    <div
+                                                                        className={shouldShowGreen ? 'lab-code' : 'theory-code'}
+                                                                        style={cell.code.includes('/') ? { display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', lineHeight: '1.1', padding: '4px 0' } : {}}
+                                                                    >
+                                                                        {cell.code.includes('/') ? cell.code.split('/').map((c, i) => <div key={i}>{c.trim()}</div>) : cell.code}
+                                                                    </div>
+                                                                    {isLab && (
+                                                                        <div className="lab-subtext" style={isInt ? { color: shouldShowGreen ? '#15803d' : '#6366f1' } : {}}>
+                                                                            {isInt ? (shouldShowGreen ? '(INT_LAB)' : '(INT.)') : '(LAB)'}
+                                                                        </div>
+                                                                    )}
+                                                                </>
+                                                            ) : <div className="action-icon">+</div>}
+                                                        </div>
                                                     </td>
                                                 );
-                                            }
+                                            })}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
 
-                                            // Access the grid for this teaching slot
-                                            const cell = grids[selectedSectionView][dIdx] ? grids[selectedSectionView][dIdx][teachingSlotIndex] : null;
-                                            teachingSlotIndex++;
+                    {/* Subject Allocation Summary */}
+                    <div className="summary-card" style={{ marginTop: '2rem', background: 'white', borderRadius: '24px', padding: '2rem', boxShadow: '0 4px 25px rgba(0,0,0,0.02)', animation: 'fadeIn 1s ease-out' }}>
+                        <h3 style={{ fontWeight: 900, marginBottom: '1.5rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{ width: '8px', height: '24px', background: '#3b82f6', borderRadius: '4px' }}></div>
+                            Subject Allocation Summary
+                        </h3>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
+                            {(() => {
+                                const currentGrid = grids[selectedSectionView];
+                                const counts = {};
 
-                                            const isLab = isLabNode(cell);
-                                            const isInt = cell && (String(cell.type || '').toUpperCase().includes('INTEGRATED') || String(cell.name || '').toUpperCase().includes('INTEGRATED') || String(cell.name || '').toUpperCase().includes('GRAPHICS'));
+                                // Count Allocations
+                                let totalAllocated = 0;
+                                currentGrid.flat().forEach(cell => {
+                                    if (cell && cell.code) {
+                                        const parts = cell.code.includes('/') ? cell.code.split('/') : [cell.code];
+                                        parts.forEach(p => {
+                                            const c = p.trim();
+                                            counts[c] = (counts[c] || 0) + 1;
+                                            totalAllocated++;
+                                        });
+                                    }
+                                });
 
-                                            const isIntLab = isInt && cell && cell.isLab;
-                                            const isNormalLab = isLab && !isInt;
-                                            const shouldShowGreen = isNormalLab || isIntLab;
+                                // Prepare List
+                                const summaryList = subjects
+                                    .filter(s => s.semester === semester)
+                                    .map(sub => {
+                                        const teacher = teachers.find(t => t.subjectCode === sub.code && t.section === selectedSectionView);
+                                        return {
+                                            code: sub.code,
+                                            name: sub.name,
+                                            staff: teacher ? teacher.name : 'TBA',
+                                            required: (parseInt(sub.credit) || 0) + (parseInt(sub.satCount) || 0),
+                                            allocated: counts[sub.code] || 0
+                                        };
+                                    });
 
-                                            const isActuallyLab = isLab && !isInt;
-                                            const showDashed = isActuallyLab && cell && cell.isFixedFromWord;
+                                // Consolidate duplicates (e.g. Lab + Theory separate entries)
+                                const summaryListFinal = Object.values(summaryList.reduce((acc, curr) => {
+                                    if (!acc[curr.code]) {
+                                        acc[curr.code] = { ...curr };
+                                    } else {
+                                        acc[curr.code].required += curr.required;
+                                        // Allocated is same per code, keep existing
+                                    }
+                                    return acc;
+                                }, {}));
 
-                                            // Correction for grid index in click handler: we must pass the teachingSlotIndex - 1 (since we just incremented it)
-                                            const currentGridIndex = teachingSlotIndex - 1;
+                                // Add any codes in grid not in subject list (e.g. manually added custom codes)
+                                Object.keys(counts).forEach(code => {
+                                    if (!summaryListFinal.find(s => s.code === code)) {
+                                        summaryListFinal.push({
+                                            code: code,
+                                            name: 'Custom / External',
+                                            staff: '-',
+                                            required: 0,
+                                            allocated: counts[code]
+                                        });
+                                    }
+                                });
+
+                                const totalReq = summaryListFinal.reduce((acc, s) => acc + s.required, 0);
+
+                                return (
+                                    <>
+                                        <div style={{ gridColumn: '1 / -1', marginBottom: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                                            <div style={{ padding: '0.8rem 1.5rem', background: '#eff6ff', borderRadius: '12px', border: '1px solid #bfdbfe', color: '#1e40af', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                                                Total Subjects: <span style={{ fontSize: '1.2rem', marginLeft: '5px' }}>{summaryListFinal.length}</span>
+                                            </div>
+                                            <div style={{ padding: '0.8rem 1.5rem', background: '#eff6ff', borderRadius: '12px', border: '1px solid #bfdbfe', color: '#1e40af', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                                                Total Assigned: <span style={{ fontSize: '1.2rem', marginLeft: '5px' }}>{totalAllocated}</span> Hrs
+                                            </div>
+                                            <div style={{ padding: '0.8rem 1.5rem', background: '#f0fdf4', borderRadius: '12px', border: '1px solid #bbf7d0', color: '#166534', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                                                Target Hours: <span style={{ fontSize: '1.2rem', marginLeft: '5px' }}>{totalReq}</span> Hrs
+                                            </div>
+                                        </div>
+                                        {summaryListFinal.sort((a, b) => b.allocated - a.allocated).map(stat => {
+                                            const isMet = stat.allocated >= stat.required;
+                                            const difference = stat.allocated - stat.required;
+                                            const statusColor = isMet ? '#10b981' : '#f59e0b';
+                                            const statusBg = isMet ? '#d1fae5' : '#fef3c7';
 
                                             return (
-                                                <td key={`${dIdx}-${sIdx}`} className="cell-container">
-                                                    <div
-                                                        className={`subject-card ${shouldShowGreen ? 'lab-box' : ''} ${showDashed ? 'lab-locked' : ''}`}
-                                                        onClick={() => handleCellClick(dIdx, currentGridIndex, cell)}
-                                                    >
-                                                        {cell ? (
-                                                            <>
-                                                                {cell.isFixedFromWord && <Lock className="lock-icon" size={12} style={{ color: shouldShowGreen ? '#15803d' : '#4f46e5', opacity: 0.6 }} />}
-                                                                <div
-                                                                    className={shouldShowGreen ? 'lab-code' : 'theory-code'}
-                                                                    style={cell.code.includes('/') ? { display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', lineHeight: '1.1', padding: '4px 0' } : {}}
-                                                                >
-                                                                    {cell.code.includes('/') ? cell.code.split('/').map((c, i) => <div key={i}>{c.trim()}</div>) : cell.code}
-                                                                </div>
-                                                                {isLab && (
-                                                                    <div className="lab-subtext" style={isInt ? { color: shouldShowGreen ? '#15803d' : '#6366f1' } : {}}>
-                                                                        {isInt ? (shouldShowGreen ? '(INT_LAB)' : '(INT.)') : '(LAB)'}
-                                                                    </div>
-                                                                )}
-                                                            </>
-                                                        ) : <div className="action-icon">+</div>}
+                                                <div key={stat.code} style={{ padding: '1.2rem', borderRadius: '16px', background: '#f8fafc', border: '1px solid #e2e8f0', transition: 'transform 0.2s' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.8rem' }}>
+                                                        <span style={{ fontWeight: 900, color: '#3b82f6', fontSize: '1.1rem' }}>{stat.code}</span>
+                                                        <span style={{
+                                                            fontWeight: 800,
+                                                            color: statusColor,
+                                                            background: statusBg,
+                                                            padding: '4px 10px', borderRadius: '8px', fontSize: '0.8rem',
+                                                            display: 'flex', alignItems: 'center', gap: '4px'
+                                                        }}>
+                                                            {stat.allocated} / {stat.required} Hrs
+                                                            {difference !== 0 && (
+                                                                <span style={{ opacity: 0.8, fontSize: '0.7rem' }}>
+                                                                    ({difference > 0 ? '+' : ''}{difference})
+                                                                </span>
+                                                            )}
+                                                        </span>
                                                     </div>
-                                                </td>
+                                                    <div style={{ fontSize: '0.85rem', color: '#475569', fontWeight: 700, marginBottom: '0.4rem', lineHeight: '1.3' }}>
+                                                        {stat.name}
+                                                    </div>
+                                                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#cbd5e1' }}></div>
+                                                        {stat.staff}
+                                                    </div>
+                                                </div>
                                             );
                                         })}
-                                    </tr>
+                                    </>
                                 );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
+                            })()}
+                        </div >
+                    </div>
+                </>
             ) : (
                 <div style={{ textAlign: 'center', padding: '10rem 0', background: 'white', borderRadius: '28px', border: '1px solid #f1f5f9' }}>
                     <h3 style={{ color: '#94a3b8', fontWeight: 900, fontSize: '1.2rem' }}>No Schedule Generated for Section {selectedSectionView}</h3>
