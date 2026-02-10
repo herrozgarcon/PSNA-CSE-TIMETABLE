@@ -89,15 +89,31 @@ export const DataProvider = ({ children }) => {
     };
 
     const deleteTeachers = async (id) => {
+        // Find teacher to get name for account deletion
+        const teacherToDelete = teachers.find(t => t.id === id);
+
         _setTeachers(prev => prev.filter(t => t.id !== id));
         const { error } = await supabase.from('teachers').delete().eq('id', id);
+
+        if (teacherToDelete) {
+            // Also delete from faculty_accounts matching the name
+            // Note: This matches by exact name which is the best link we have currently
+            _setFacultyAccounts(prev => prev.filter(a => a.name !== teacherToDelete.name));
+            await supabase.from('faculty_accounts').delete().eq('name', teacherToDelete.name);
+        }
+
         if (error) console.error("Error deleting teacher:", error);
     };
 
     const clearTeachers = async () => {
         _setTeachers([]);
-        const { error } = await supabase.from('teachers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        if (error) console.error("Error clearing teachers:", error);
+        _setFacultyAccounts([]);
+
+        const { error: tError } = await supabase.from('teachers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        const { error: fError } = await supabase.from('faculty_accounts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+        if (tError) console.error("Error clearing teachers:", tError);
+        if (fError) console.error("Error clearing faculty accounts:", fError);
     };
 
     // Exported setTeachers (for Excel Import - Replaces All)
