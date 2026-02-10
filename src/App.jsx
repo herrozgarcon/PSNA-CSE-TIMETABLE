@@ -11,7 +11,9 @@ import FacultyDashboard from './pages/FacultyDashboard';
 import ExcelPreview from './pages/ExcelPreview';
 import WordPreview from './pages/WordPreview';
 import TimeSlots from './pages/TimeSlots';
+import Admins from './pages/Admins'; // Import the new page
 import { DataProvider } from './context/DataContext';
+
 function App() {
     const [isAuthenticated, setIsAuthenticated] = useState(() => {
         return localStorage.getItem('isAuthenticated') === 'true';
@@ -23,6 +25,7 @@ function App() {
         const stored = localStorage.getItem('currentUser');
         return stored ? JSON.parse(stored) : null;
     });
+
     const handleLogin = (role = 'admin', userData = null) => {
         setIsAuthenticated(true);
         setUserRole(role);
@@ -35,6 +38,7 @@ function App() {
             localStorage.removeItem('currentUser');
         }
     };
+
     const handleLogout = () => {
         setIsAuthenticated(false);
         setUserRole('admin');
@@ -43,6 +47,7 @@ function App() {
         localStorage.removeItem('userRole');
         localStorage.removeItem('currentUser');
     };
+
     return (
         <DataProvider>
             {!isAuthenticated ? (
@@ -50,7 +55,7 @@ function App() {
             ) : (
                 <Layout onLogout={handleLogout} userRole={userRole} currentUser={currentUser}>
                     <Routes>
-                        {userRole === 'admin' ? (
+                        {['admin', 'hod'].includes(userRole) ? (
                             <>
                                 <Route path="/" element={<Dashboard />} />
                                 <Route path="/timetable" element={<Timetable />} />
@@ -60,6 +65,7 @@ function App() {
                                 <Route path="/excel-preview" element={<ExcelPreview />} />
                                 <Route path="/word-preview" element={<WordPreview />} />
                                 <Route path="/time-slots" element={<TimeSlots />} />
+                                {userRole === 'admin' && <Route path="/admins" element={<Admins />} />}
                             </>
                         ) : (
                             <>
@@ -74,4 +80,5 @@ function App() {
         </DataProvider>
     );
 }
+
 export default App;
