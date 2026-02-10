@@ -189,6 +189,13 @@ export const DataProvider = ({ children }) => {
         if (error) console.error("Error updating schedule:", error);
     };
 
+    const clearSchedules = async () => {
+        _setSchedule({});
+        // Use a condition that matches all rows. 'semester' should not be 'invalid_value'
+        const { error } = await supabase.from('schedules').delete().neq('semester', 'invalid_value');
+        if (error) console.error("Error clearing schedules:", error);
+    };
+
     // --- Faculty Accounts ---
     const addFacultyAccounts = async (newAccounts) => {
         // Hash passwords before storing
@@ -213,6 +220,16 @@ export const DataProvider = ({ children }) => {
     const deleteFacultyAccount = async (id) => {
         _setFacultyAccounts(prev => prev.filter(a => a.id !== id));
         await supabase.from('faculty_accounts').delete().eq('id', id);
+    };
+
+    const updateFacultyAvailability = async (id, availability) => {
+        /* Placeholder if needed later */
+    };
+
+    const updateFacultyPermission = async (id, canGenerate) => {
+        _setFacultyAccounts(prev => prev.map(a => a.id === id ? { ...a, can_generate: canGenerate } : a));
+        const { error } = await supabase.from('faculty_accounts').update({ can_generate: canGenerate }).eq('id', id);
+        if (error) console.error("Error updating faculty permission:", error);
     };
 
     const clearFacultyAccounts = async () => {
@@ -329,9 +346,11 @@ export const DataProvider = ({ children }) => {
             setSubjects,
 
             updateSchedule,
+            clearSchedules,
 
             addFacultyAccounts,
             deleteFacultyAccount,
+            updateFacultyPermission,
             clearFacultyAccounts,
             setFacultyAccounts,
 

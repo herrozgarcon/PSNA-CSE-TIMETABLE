@@ -9,7 +9,7 @@ const Layout = ({ children, onLogout, userRole, currentUser }) => {
         <div className="app-layout">
             <Header onLogout={onLogout} currentUser={currentUser} />
             <div className="app-body">
-                <Sidebar userRole={userRole} />
+                <Sidebar userRole={userRole} currentUser={currentUser} />
                 <main className="app-main">
                     {children}
                 </main>
