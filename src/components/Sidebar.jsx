@@ -3,14 +3,14 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Calendar, Users, BookOpen, Layers, FileSpreadsheet, FileText, Clock, Shield } from 'lucide-react';
 import './Layout.css';
 
-const Sidebar = ({ userRole }) => {
+const Sidebar = ({ userRole, currentUser }) => {
     const location = useLocation();
 
-    const navItems = userRole === 'faculty'
-        ? [
-            { path: '/', icon: LayoutDashboard, label: 'My Timetable' }
-        ]
-        : [
+    // Determine nav items based on user role and permissions
+    let navItems = [];
+
+    if (userRole === 'admin') {
+        navItems = [
             { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
             { path: '/timetable', icon: Calendar, label: 'Timetable' },
             { path: '/allocations', icon: Layers, label: 'Allocations' },
@@ -19,13 +19,27 @@ const Sidebar = ({ userRole }) => {
             { path: '/subjects', icon: BookOpen, label: 'Subjects' },
             { path: '/excel-preview', icon: FileSpreadsheet, label: 'Excel Preview' },
             { path: '/word-preview', icon: FileText, label: 'Word Preview' },
-            // Only Super Admins see the Admin Management
-            ...(userRole === 'admin' ? [{ path: '/admins', icon: Shield, label: 'Admins' }] : []),
+            { path: '/admins', icon: Shield, label: 'Admins' },
+            { path: '/faculty-permissions', icon: Shield, label: 'Permissions' }
         ];
+    } else if (userRole === 'faculty') {
+        navItems = [
+            { path: '/', icon: LayoutDashboard, label: 'My Timetable' }
+        ];
+
+        // If faculty has permission to generate timetables
+        if (currentUser?.can_generate) {
+            navItems.push(
+                { path: '/timetable', icon: Calendar, label: 'Manage Timetable' },
+                { path: '/teachers', icon: Users, label: 'Manage Teachers' },
+                { path: '/excel-preview', icon: FileSpreadsheet, label: 'Excel Import' },
+                { path: '/word-preview', icon: FileText, label: 'Constraints' }
+            );
+        }
+    }
 
     return (
         <aside className="app-sidebar">
-
             <nav className="sidebar-nav">
                 {navItems.map((item) => (
                     <NavLink

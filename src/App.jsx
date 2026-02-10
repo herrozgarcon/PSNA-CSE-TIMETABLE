@@ -11,7 +11,8 @@ import FacultyDashboard from './pages/FacultyDashboard';
 import ExcelPreview from './pages/ExcelPreview';
 import WordPreview from './pages/WordPreview';
 import TimeSlots from './pages/TimeSlots';
-import Admins from './pages/Admins'; // Import the new page
+import Admins from './pages/Admins';
+import FacultyPermissions from './pages/FacultyPermissions';
 import { DataProvider } from './context/DataContext';
 
 function App() {
@@ -65,11 +66,22 @@ function App() {
                                 <Route path="/excel-preview" element={<ExcelPreview />} />
                                 <Route path="/word-preview" element={<WordPreview />} />
                                 <Route path="/time-slots" element={<TimeSlots />} />
-                                {userRole === 'admin' && <Route path="/admins" element={<Admins />} />}
+                                <Route path="/admins" element={<Admins />} />
+                                <Route path="/faculty-permissions" element={<FacultyPermissions />} />
                             </>
                         ) : (
                             <>
                                 <Route path="/" element={<FacultyDashboard facultyName={currentUser?.name || 'Faculty'} />} />
+
+                                {currentUser?.can_generate && (
+                                    <>
+                                        <Route path="/timetable" element={<Timetable />} />
+                                        <Route path="/teachers" element={<Teachers />} />
+                                        <Route path="/excel-preview" element={<ExcelPreview />} />
+                                        <Route path="/word-preview" element={<WordPreview />} />
+                                    </>
+                                )}
+
                                 <Route path="*" element={<Navigate to="/" replace />} />
                             </>
                         )}

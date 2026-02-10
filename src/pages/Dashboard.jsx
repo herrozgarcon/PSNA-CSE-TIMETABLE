@@ -13,13 +13,14 @@ const StatCard = ({ title, value, icon: Icon, color }) => (
     </div>
 );
 const Dashboard = () => {
-    const { teachers, subjects, clearTeachers, clearSubjects, clearFacultyAccounts, clearPreemptiveConstraints, updateSchedule } = useData();
-    const handleResetAll = () => {
+    const { teachers, subjects, clearTeachers, clearSubjects, clearFacultyAccounts, clearPreemptiveConstraints, clearSchedules } = useData();
+    const handleResetAll = async () => {
         if (window.confirm('CRITICAL: This will delete ALL imported Excel and Word data. Are you sure?')) {
-            clearTeachers();
-            clearSubjects();
-            clearFacultyAccounts();
-            clearPreemptiveConstraints();
+            await clearTeachers();
+            await clearSubjects();
+            await clearFacultyAccounts();
+            await clearPreemptiveConstraints();
+            await clearSchedules();
             localStorage.removeItem('timetable_schedule');
             window.location.reload();
         }

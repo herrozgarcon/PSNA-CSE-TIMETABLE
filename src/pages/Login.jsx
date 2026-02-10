@@ -11,73 +11,49 @@ const Login = ({ onLogin }) => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        setError('');
+
         const emailInput = email.trim().toLowerCase();
         const passInput = password.trim();
-        setError(''); // Clear previous error
 
         // Helper to check password (supports both hash and plain text)
         const checkPassword = (input, stored) => {
             if (!stored) return false;
-            // Check if stored password looks like a bcrypt hash
-            if (stored.startsWith('$2') || stored.startsWith('$2a$') || stored.startsWith('$2b$')) {
+            if (stored.startsWith('$2')) {
                 try {
                     return bcrypt.compareSync(input, stored);
-                } catch (err) {
-                    console.error("Bcrypt compare error:", err);
-                    return false;
-                }
+                } catch (err) { return false; }
             }
-            // Fallback to plain text comparison
             return input === stored;
         };
 
-        // 1. Check Admin Accounts
-        // Ensure adminAccounts is loaded before checking
-        console.log("Checking Admin Login:", emailInput);
-        console.log("Available Admins:", adminAccounts);
-
-        const adminUser = adminAccounts?.find(acc => {
-            const matchesEmail = acc.email.toLowerCase() === emailInput;
-            const matchesPass = checkPassword(passInput, acc.password);
-            console.log(`Checking ${acc.email}: Email Match=${matchesEmail}, Pass Match=${matchesPass}`);
-            return matchesEmail && matchesPass;
-        });
+        // 1. Check Admin
+        const adminUser = (adminAccounts || []).find(acc =>
+            acc.email.toLowerCase() === emailInput && checkPassword(passInput, acc.password)
+        );
 
         if (adminUser) {
             onLogin('admin', adminUser);
             return;
         }
 
-        // 2. Check Faculty Accounts (Explicit)
-        // Check if an explicit faculty account exists
-        let facultyUser = facultyAccounts?.find(acc => acc.email.toLowerCase() === emailInput && checkPassword(passInput, acc.password));
-
-        // 3. Fallback: Auto-detect Faculty from Teacher Data (if no account explicit)
-        // This allows teachers added to the system to login with their auto-generated handle
-        if (!facultyUser) {
-            const emailHandle = emailInput.split('@')[0];
-            const foundTeacher = teachers?.find(t => {
-                const parts = t.name.trim().split(/\s+/);
-                const lastName = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
-                return lastName === emailHandle;
-            });
-
-            // Password must match the handle (last name lowercased) - This is always plain text logic for auto-gen
-            if (foundTeacher && passInput.toLowerCase() === emailHandle) {
-                facultyUser = { ...foundTeacher, email: emailInput, name: foundTeacher.name };
-            }
-        }
-
-        // Validate
-        const emailExists = facultyAccounts?.some(acc => acc.email.toLowerCase() === emailInput) || adminAccounts?.some(acc => acc.email.toLowerCase() === emailInput);
+        // 2. Check Faculty Account (Explicit)
+        const facultyUser = (facultyAccounts || []).find(acc =>
+            acc.email.toLowerCase() === emailInput && checkPassword(passInput, acc.password)
+        );
 
         if (facultyUser) {
             onLogin('faculty', facultyUser);
-        } else if (emailExists) {
-            setError('Incorrect password');
-        } else {
-            setError('User not found. Please contact an admin.');
+            return;
         }
+
+        // 3. Fallback: Check Teachers for Implicit Accounts (if legacy behavior needed)
+        // Note: It's safer to rely on created faculty_accounts, but keeping this if per requirements
+        /* 
+        const foundTeacher = teachers?.find(t => { ... });
+        */
+
+        setError('Invalid email or password');
     };
 
     return (
