@@ -13,7 +13,7 @@ const StatCard = ({ title, value, icon: Icon, color }) => (
     </div>
 );
 const Dashboard = () => {
-    const { teachers, subjects, clearTeachers, clearSubjects, clearFacultyAccounts, clearPreemptiveConstraints, clearSchedules } = useData();
+    const { teachers, subjects, facultyAccounts, clearTeachers, clearSubjects, clearFacultyAccounts, clearPreemptiveConstraints, clearSchedules } = useData();
     const handleResetAll = async () => {
         if (window.confirm('CRITICAL: This will delete ALL imported Excel and Word data. Are you sure?')) {
             await clearTeachers();
@@ -25,7 +25,11 @@ const Dashboard = () => {
             window.location.reload();
         }
     };
-    const teacherCount = new Set(teachers.map(t => t.name)).size;
+    const allNames = [
+        ...teachers.map(t => t.name),
+        ...(facultyAccounts || []).map(f => f.name)
+    ].filter(Boolean).map(n => n.trim().toLowerCase());
+    const teacherCount = new Set(allNames).size;
     const subjectCount = subjects.length;
     return (
         <div>
