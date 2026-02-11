@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
 import { Plus, Search, Edit2, Trash2 } from 'lucide-react';
 import Modal from '../components/Modal';
-
+import { useData } from '../context/DataContext';
 const Rooms = () => {
-    // Start with empty data
-    const [rooms, setRooms] = useState([]);
-
+    const { rooms, addRooms, deleteRoom, updateRoom } = useData();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentRoom, setCurrentRoom] = useState({
         id: null,
@@ -15,33 +13,29 @@ const Rooms = () => {
         building: ''
     });
     const [isEditing, setIsEditing] = useState(false);
-
     const openAddModal = () => {
         setIsEditing(false);
         setCurrentRoom({ id: null, name: '', capacity: '', type: 'Lecture Hall', building: '' });
         setIsModalOpen(true);
     };
-
     const handleEdit = (room) => {
         setIsEditing(true);
         setCurrentRoom(room);
         setIsModalOpen(true);
     };
-
     const handleDelete = (id) => {
-        // Removed confirmation alert
-        setRooms(rooms.filter(room => room.id !== id));
+        if (window.confirm("Delete this room?")) {
+            deleteRoom(id);
+        }
     };
-
     const handleSaveRoom = () => {
         if (isEditing) {
-            setRooms(rooms.map(r => r.id === currentRoom.id ? currentRoom : r));
+            updateRoom(currentRoom);
         } else {
-            setRooms([...rooms, { ...currentRoom, id: Date.now() }]);
+            addRooms([{ ...currentRoom, id: Date.now() }]);
         }
         setIsModalOpen(false);
     };
-
     return (
         <div>
             <div className="page-header">
@@ -60,7 +54,6 @@ const Rooms = () => {
                     </button>
                 </div>
             </div>
-
             <div className="table-container">
                 <table>
                     <thead>
@@ -106,7 +99,6 @@ const Rooms = () => {
                     </tbody>
                 </table>
             </div>
-
             <Modal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
@@ -168,5 +160,4 @@ const Rooms = () => {
         </div>
     );
 };
-
 export default Rooms;

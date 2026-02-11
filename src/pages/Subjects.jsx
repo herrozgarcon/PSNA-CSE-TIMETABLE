@@ -20,7 +20,6 @@ const Subjects = () => {
             s.code.toLowerCase().includes(search.toLowerCase());
         const matchesSem = filterSem === 'All' || s.semester === filterSem;
         let type = s.type || 'Lecture';
-        // Priority detection for Electives based on name pattern
         if (/-\s*(I|II|III|IV)\s*\*?\s*$/i.test(s.name) || s.name.toUpperCase().includes('ELECTIVE')) {
             type = 'Elective';
         } else if (!s.type && (s.code.includes('LAB') || s.name.toUpperCase().includes('LABORATORY') || s.name.toUpperCase().includes('PRACTICAL'))) {
@@ -32,7 +31,6 @@ const Subjects = () => {
     const uniqueSems = Array.from(new Set(subjects.map(s => s.semester))).sort();
     const [openDropdown, setOpenDropdown] = useState(null); // 'sem' or 'type'
     const dropdownRef = React.useRef(null);
-
     React.useEffect(() => {
         const handleClickOutside = (e) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setOpenDropdown(null);
@@ -40,7 +38,6 @@ const Subjects = () => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
-
     return (
         <div>
             <div className="page-header">
@@ -90,7 +87,6 @@ const Subjects = () => {
                                 </div>
                             )}
                         </div>
-
                         <div className="custom-select-container">
                             <div
                                 className={`custom-select-trigger ${openDropdown === 'type' ? 'active' : ''}`}

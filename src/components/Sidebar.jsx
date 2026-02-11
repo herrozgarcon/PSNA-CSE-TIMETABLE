@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Calendar, Users, BookOpen, Layers, FileSpreadsheet, FileText, Clock } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, BookOpen, Layers, FileSpreadsheet, FileText, Clock, Home } from 'lucide-react';
 import './Layout.css';
 const Sidebar = ({ userRole }) => {
     const location = useLocation();
@@ -13,6 +13,7 @@ const Sidebar = ({ userRole }) => {
             { path: '/timetable', icon: Calendar, label: 'Timetable' },
             { path: '/allocations', icon: Layers, label: 'Allocations' },
             { path: '/time-slots', icon: Clock, label: 'Time Slots' },
+            { path: '/rooms', icon: Home, label: 'Rooms' },
             { path: '/teachers', icon: Users, label: 'Teachers' },
             { path: '/subjects', icon: BookOpen, label: 'Subjects' },
             { path: '/excel-preview', icon: FileSpreadsheet, label: 'Excel Preview' },

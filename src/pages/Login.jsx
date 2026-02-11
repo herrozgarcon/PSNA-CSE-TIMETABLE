@@ -23,7 +23,6 @@ const Login = ({ onLogin }) => {
             }
         }
         const emailExists = facultyAccounts?.some(acc => acc.email.toLowerCase() === emailInput);
-
         if (emailInput === 'admin@psnacet.edu.in' && passInput === 'admin') {
             onLogin('admin', { name: 'Admin' });
         } else if (facultyUser) {

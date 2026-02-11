@@ -11,6 +11,7 @@ import FacultyDashboard from './pages/FacultyDashboard';
 import ExcelPreview from './pages/ExcelPreview';
 import WordPreview from './pages/WordPreview';
 import TimeSlots from './pages/TimeSlots';
+import Rooms from './pages/Rooms';
 import { DataProvider } from './context/DataContext';
 function App() {
     const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -60,6 +61,7 @@ function App() {
                                 <Route path="/excel-preview" element={<ExcelPreview />} />
                                 <Route path="/word-preview" element={<WordPreview />} />
                                 <Route path="/time-slots" element={<TimeSlots />} />
+                                <Route path="/rooms" element={<Rooms />} />
                             </>
                         ) : (
                             <>

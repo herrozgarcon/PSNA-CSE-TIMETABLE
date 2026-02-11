@@ -49,7 +49,6 @@ const Teachers = () => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
-
     return (
         <div>
             <div className="page-header">
@@ -81,7 +80,6 @@ const Teachers = () => {
                     </div>
                     <div className="filter-group">
                         <Filter size={18} color="#94a3b8" />
-
                         <div className="custom-select-container">
                             <div
                                 className={`custom-select-trigger ${isDropdownOpen ? 'active' : ''}`}

@@ -1,74 +1,51 @@
-
 import React, { useState, useEffect } from 'react';
 import { Upload, Plus, Trash2, Clock, Save, Coffee, BookOpen, Edit2, XCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useData } from '../context/DataContext';
-
 const TimeSlots = () => {
     const { timeSlots, setTimeSlots } = useData();
     const [localSlots, setLocalSlots] = useState([]);
-
     useEffect(() => {
         if (timeSlots) {
             setLocalSlots(timeSlots);
         }
     }, [timeSlots]);
-
     const [newSlot, setNewSlot] = useState({ startTime: '', endTime: '', label: '', type: 'teaching' });
-
     const normalizeTime = (timeStr) => {
         if (!timeStr) return '';
         let [h, m] = timeStr.trim().split(':');
         let hour = parseInt(h, 10);
-
-        // Smart Heuristic: Schools generally operate 7 AM to 6 PM.
-        // If a time is entered as 01:00 - 06:00, it is almost certainly PM (13:00 - 18:00).
-        // 07:00 - 11:00 is AM. 12:00 is PM.
         if (hour >= 1 && hour <= 6) {
             hour += 12;
         }
-
-        // Handle 12 AM edge case if user entered 00:xx -> Keep as 00 (Midnight) or convert? 
-        // Unlikely for school, but 00 usually means start of day. 
-
         const hh = String(hour).padStart(2, '0');
         const mm = m ? m.padStart(2, '0') : '00';
         return `${hh}:${mm}`;
     };
-
     const extractPeriodNumber = (label) => {
         const match = label.match(/(\d+)/);
         return match ? parseInt(match[0], 10) : 999;
     };
 
     const handleSave = () => {
-        // Customize normalization + Ensure IDs are strings
         const normalized = localSlots.map(slot => ({
             ...slot,
-            id: String(slot.id || Date.now() + Math.random()), // Ensure robust ID
+            id: String(slot.id || Date.now() + Math.random()),
             startTime: normalizeTime(slot.startTime),
             endTime: normalizeTime(slot.endTime)
         }));
-
-        // Sort: Primary = Chronological, Secondary = Period Number
-        // This ensures correct ordering even if times are identical or weird
         const sorted = normalized.sort((a, b) => {
             const timeCompare = a.startTime.localeCompare(b.startTime);
             if (timeCompare !== 0) return timeCompare;
-
             return extractPeriodNumber(a.label) - extractPeriodNumber(b.label);
         });
-
         setTimeSlots(sorted);
         setLocalSlots(sorted);
         alert('Configuration saved successfully! Time slots have been normalized and sorted.');
     };
-
     const [editingId, setEditingId] = useState(null);
-
     const handleAddSlot = () => {
         if (!newSlot.startTime || !newSlot.endTime || !newSlot.label) return;
-
         if (editingId) {
             setLocalSlots(prev => prev.map(slot =>
                 String(slot.id) === String(editingId)
@@ -83,15 +60,14 @@ const TimeSlots = () => {
             setEditingId(null);
         } else {
             setLocalSlots(prev => [...prev, {
-                id: `manual-${Date.now()}-${Math.floor(Math.random() * 1000)}`, // Guaranteed Unique String ID
+                id: `manual-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
                 ...newSlot,
                 startTime: normalizeTime(newSlot.startTime),
-                endTime: normalizeTime(newSlot.endTime) // Ensure 24h format for storage
+                endTime: normalizeTime(newSlot.endTime)
             }]);
         }
         setNewSlot({ startTime: '', endTime: '', label: '', type: 'teaching' });
     };
-
     const handleEditSlot = (slot) => {
         setNewSlot({
             startTime: slot.startTime,
@@ -102,28 +78,21 @@ const TimeSlots = () => {
         setEditingId(String(slot.id));
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
-
     const handleCancelEdit = () => {
         setNewSlot({ startTime: '', endTime: '', label: '', type: 'teaching' });
         setEditingId(null);
     };
-
     const handleDeleteSlot = (id, label) => {
-        // Debugging confirmation to ensure click registers
-        // Using a simple intentionally visible confirmation
         if (window.confirm(`Delete "${label}"?`)) {
             setLocalSlots(prev => {
                 const filtered = prev.filter(slot => String(slot.id) !== String(id));
                 return filtered;
             });
-            // If editing this slot, cancel edit
             if (String(editingId) === String(id)) {
                 handleCancelEdit();
             }
         }
     };
-
-    // Sanitize IDs on mount/update to ensure deletions work
     useEffect(() => {
         if (localSlots.some(s => !s.id || typeof s.id === 'object')) {
             const clean = localSlots.map((s, i) => ({
@@ -132,12 +101,10 @@ const TimeSlots = () => {
             }));
             setLocalSlots(clean);
         }
-    }, [localSlots.length]); // Check when count changes
-
+    }, [localSlots.length]);
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = (evt) => {
             const bstr = evt.target.result;
@@ -145,13 +112,10 @@ const TimeSlots = () => {
             const wsname = wb.SheetNames[0];
             const ws = wb.Sheets[wsname];
             const data = XLSX.utils.sheet_to_json(ws);
-
-            // EXPECTED FORMAT: { Start: "09:00", End: "10:00", Label: "Period 1", Type: "teaching" }
             const importedSlots = data.map((row, index) => {
                 let type = 'teaching';
                 if (row.Type) type = row.Type.toLowerCase();
                 else if (row.Label && (row.Label.toLowerCase().includes('break') || row.Label.toLowerCase().includes('lunch'))) type = 'break';
-
                 return {
                     id: `import-${Date.now()}-${index}`, // Robust ID
                     startTime: normalizeTime(row.Start || row.startTime || ''),
@@ -160,8 +124,6 @@ const TimeSlots = () => {
                     type: type
                 };
             }).filter(slot => slot.startTime && slot.endTime);
-
-            // Filter out internal duplicates (within the imported file itself)
             const uniqueImportedSlots = [];
             const seenImported = new Set();
             for (const slot of importedSlots) {
@@ -171,8 +133,6 @@ const TimeSlots = () => {
                     uniqueImportedSlots.push(slot);
                 }
             }
-
-            // Filter out duplicates against existing slots
             const newUniqueSlots = uniqueImportedSlots.filter(newSlot => {
                 const isDuplicate = localSlots.some(existingSlot =>
                     existingSlot.startTime === newSlot.startTime &&
@@ -180,17 +140,14 @@ const TimeSlots = () => {
                 );
                 return !isDuplicate;
             });
-
             if (newUniqueSlots.length < importedSlots.length) {
                 const duplicateCount = importedSlots.length - newUniqueSlots.length;
                 alert(`Import completed: ${newUniqueSlots.length} new slots added. ${duplicateCount} duplicates skipped.`);
             }
-
             setLocalSlots([...localSlots, ...newUniqueSlots]);
         };
         reader.readAsBinaryString(file);
     };
-
     const handleDownloadTemplate = () => {
         const templateData = [
             { Start: '09:00', End: '09:50', Label: 'Period 1', Type: 'teaching' },
@@ -202,7 +159,6 @@ const TimeSlots = () => {
         XLSX.utils.book_append_sheet(wb, ws, "Template");
         XLSX.writeFile(wb, "time_slots_template.xlsx");
     };
-
     const formatTime12h = (time24) => {
         if (!time24) return '';
         const [h, m] = time24.split(':');
@@ -211,7 +167,6 @@ const TimeSlots = () => {
         const hour12 = hour % 12 || 12;
         return `${hour12}:${m} ${ampm}`;
     };
-
     return (
         <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
             <div style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -230,11 +185,9 @@ const TimeSlots = () => {
                     Save Configuration
                 </button>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '2rem' }}>
                 {/* Left Column: Controls */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-
                     {/* Manual Entry Card */}
                     <div className="card" style={{ padding: '1.5rem', background: 'white', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
                         <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -317,7 +270,6 @@ const TimeSlots = () => {
                             </div>
                         </div>
                     </div>
-
                     {/* Upload Card */}
                     <div className="card" style={{ padding: '1.5rem', background: 'white', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
                         <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

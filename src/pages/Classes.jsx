@@ -102,10 +102,7 @@ const Classes = () => {
                 footer={
                     <>
                         <button className="btn btn-outline" onClick={() => setIsModalOpen(false)}>Cancel</button>
-                        <button className="btn btn-primary" onClick={handleSaveClass}>{isEditing ? "Save Changes" : "Add Class"}</button>
-                    </>
-                }
-            >
+                        <button className="btn btn-primary" onClick={handleSaveClass}>{isEditing ? "Save Changes" : "Add Class"}</button></>}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <div className="form-group">
                         <label className="form-label">Class Name</label>
@@ -114,8 +111,7 @@ const Classes = () => {
                             className="input-field w-full"
                             placeholder="e.g. CS - Year 1 - Section A"
                             value={currentClass.name}
-                            onChange={(e) => setCurrentClass({ ...currentClass, name: e.target.value })}
-                        />
+                            onChange={(e) => setCurrentClass({ ...currentClass, name: e.target.value })}/>
                     </div>
                     <div className="form-group">
                         <label className="form-label">Number of Students</label>
@@ -124,16 +120,14 @@ const Classes = () => {
                             className="input-field w-full"
                             placeholder="e.g. 45"
                             value={currentClass.students}
-                            onChange={(e) => setCurrentClass({ ...currentClass, students: e.target.value })}
-                        />
+                            onChange={(e) => setCurrentClass({ ...currentClass, students: e.target.value })}/>
                     </div>
                     <div className="form-group">
                         <label className="form-label">Class Advisor</label>
                         <select
                             className="form-select"
                             value={currentClass.advisor}
-                            onChange={(e) => setCurrentClass({ ...currentClass, advisor: e.target.value })}
-                        >
+                            onChange={(e) => setCurrentClass({ ...currentClass, advisor: e.target.value })}>
                             <option value="">Select Advisor...</option>
                             {teachers.map(teacher => (
                                 <option key={teacher.id} value={teacher.name}>
@@ -147,8 +141,7 @@ const Classes = () => {
                         <select
                             className="form-select"
                             value={currentClass.room}
-                            onChange={(e) => setCurrentClass({ ...currentClass, room: e.target.value })}
-                        >
+                            onChange={(e) => setCurrentClass({ ...currentClass, room: e.target.value })}>
                             <option value="">Select Room...</option>
                             {rooms.map(room => (
                                 <option key={room.id} value={room.name}>

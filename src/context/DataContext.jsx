@@ -29,6 +29,10 @@ export const DataProvider = ({ children }) => {
         const val = safeParse('timetable_faculty_accounts', []);
         return Array.isArray(val) ? val : [];
     });
+    const [rooms, setRooms] = useState(() => {
+        const val = safeParse('timetable_rooms', []);
+        return Array.isArray(val) ? val : [];
+    });
     const [timeSlots, setTimeSlots] = useState(() => {
         const val = safeParse('timetable_slots', []);
         // Default structure if empty
@@ -71,6 +75,9 @@ export const DataProvider = ({ children }) => {
         localStorage.setItem('timetable_preemptive_constraints', JSON.stringify(preemptiveConstraints));
     }, [preemptiveConstraints]);
     useEffect(() => {
+        localStorage.setItem('timetable_rooms', JSON.stringify(rooms));
+    }, [rooms]);
+    useEffect(() => {
         localStorage.setItem('timetable_slots', JSON.stringify(timeSlots));
     }, [timeSlots]);
     const addTeachers = (newTeachers) => {
@@ -100,6 +107,16 @@ export const DataProvider = ({ children }) => {
     };
     const clearFacultyAccounts = () => setFacultyAccounts([]);
     const clearPreemptiveConstraints = () => setPreemptiveConstraints({});
+
+    const addRooms = (newRooms) => {
+        setRooms(prev => {
+            const existingIds = new Set(prev.map(r => r.id));
+            const uniqueNew = newRooms.filter(r => !existingIds.has(r.id));
+            return [...prev, ...uniqueNew];
+        });
+    };
+    const deleteRoom = (id) => setRooms(prev => prev.filter(r => r.id !== id));
+    const updateRoom = (updated) => setRooms(prev => prev.map(r => r.id === updated.id ? updated : r));
     const updateSchedule = (semester, newSchedule) => {
         setSchedule(prev => ({
             ...prev,
@@ -128,6 +145,11 @@ export const DataProvider = ({ children }) => {
             clearFacultyAccounts,
             setPreemptiveConstraints,
             clearPreemptiveConstraints,
+            rooms,
+            setRooms,
+            addRooms,
+            deleteRoom,
+            updateRoom,
             setTeachers,
             setSubjects,
             setFacultyAccounts,

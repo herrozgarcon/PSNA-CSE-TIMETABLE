@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
-import { generateClassTimetable, DAYS } from '../utils/TimetableGenerator';
-import { Printer, Play, Calendar, Clock, Layers, Save, FileSpreadsheet, Download, X, Lock, FileText } from 'lucide-react';
+import { generateClassTimetable, DAYS, isBlockSubject } from '../utils/TimetableGenerator';
+import { Printer, Play, Calendar, Clock, Layers, Save, FileSpreadsheet, Download, X, Lock, FileText, Edit2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const getCleanLabCode = (c) => norm(c).replace(/_LAB|_\d+/g, '');
@@ -56,7 +56,6 @@ const Timetable = () => {
             try {
                 const sections = getSectionsForSemester(semester);
                 const sectionsToGenerate = sections.length > 0 ? sections : ['A'];
-                const newGrids = {};
                 const globalReservedSlots = {};
                 const globalLabUsage = {};
                 const globalFacultyLoad = {};
@@ -70,7 +69,7 @@ const Timetable = () => {
                                         const tName = cell.teacherName.toUpperCase();
                                         if (!globalFacultyLoad[tName]) globalFacultyLoad[tName] = { total: 0 };
                                         if (!globalFacultyLoad[tName][d]) globalFacultyLoad[tName][d] = 0;
-                                        globalFacultyLoad[tName][d]++; // Increment duration
+                                        globalFacultyLoad[tName][d]++;
                                         globalFacultyLoad[tName].total++;
                                     }
                                 });
@@ -78,78 +77,175 @@ const Timetable = () => {
                         }
                     });
                 });
-                let syncElectives = {};
-                sectionsToGenerate.forEach(section => {
-                    const mappedSubjects = subjects.filter(s => s.semester === semester).map(sub => {
-                        const teacher = teachers.find(t => t.subjectCode === sub.code && t.section === section);
-                        return { ...sub, teacherName: teacher ? teacher.name : 'TBA' };
-                    });
-                    const finalSubjects = [];
-                    const electiveGroups = {};
-                    mappedSubjects.forEach(sub => {
-                        const nameUpper = sub.name.toUpperCase();
-                        const isElective = (sub.type === 'Elective') || nameUpper.includes('ELECTIVE');
-                        if (isElective) {
-                            const match = nameUpper.match(/(OPEN|PROFESSIONAL|FREE|DEPT|DEPARTMENT)?[\s-]*ELECTIVE[\s-–—]*(I{1,3}|IV|V|VI|VII|VIII)\s*(\*?)/);
-                            const prefix = match && match[1] ? match[1] + ' ' : '';
-                            const numeral = match ? match[2] : '';
-                            const star = match ? match[3] || '' : '';
-                            const groupKey = match ? `${prefix}ELECTIVE - ${numeral}${star}` : (sub.type === 'Elective' ? 'GeneralElective' : null);
-                            if (groupKey) {
-                                if (!electiveGroups[groupKey]) electiveGroups[groupKey] = [];
-                                electiveGroups[groupKey].push(sub);
-                            } else {
-                                finalSubjects.push(sub);
-                            }
-                        } else {
-                            finalSubjects.push(sub);
+                let finalGrids = null;
+                for (let attempt = 0; attempt < 50; attempt++) {
+                    const currentGrids = {};
+                    const currentGlobalFacultyLoad = JSON.parse(JSON.stringify(globalFacultyLoad));
+                    const semesterLabSlots = {};
+                    const sectionFixedLabs = {};
+                    const globalReservedSlots = {};
+                    const globalLabUsage = {};
+                    let labPhaseSuccess = true;
+                    const shuffledSections = [...sectionsToGenerate].sort(() => Math.random() - 0.5);
+                    for (const section of shuffledSections) {
+                        const allSectionSubjects = subjects.filter(s => s.semester === semester);
+                        const labSubjects = allSectionSubjects.filter(sub => {
+                            return isBlockSubject(sub);
+                        }).map(sub => {
+                            const subjectTeachers = teachers.filter(t => t.subjectCode === sub.code && t.section === section);
+                            const names = subjectTeachers.map(t => t.name);
+                            return {
+                                ...sub,
+                                teacherName: names.length > 0 ? names.join(' / ') : 'TBA',
+                                allTeachers: names
+                            };
+                        });
+                        if (labSubjects.length === 0) continue;
+                        const labSyncElectives = {};
+                        const labGrid = generateClassTimetable(
+                            semester,
+                            section,
+                            labSubjects,
+                            globalReservedSlots,
+                            labSyncElectives,
+                            true,
+                            globalLabUsage,
+                            teachingSlotsCount,
+                            currentGlobalFacultyLoad,
+                            {}
+                        );
+                        if (!labGrid) {
+                            labPhaseSuccess = false;
+                            break;
                         }
-                    });
-                    Object.values(electiveGroups).forEach(group => {
-                        if (group.length === 1) {
-                            finalSubjects.push(group[0]);
-                        } else if (group.length > 1) {
-                            const merged = { ...group[0] };
-                            merged.code = group.map(s => s.code).join(' / ');
-                            merged.teacherName = group.map(s => s.teacherName).join('/');
-                            merged.credit = Math.max(...group.map(s => parseInt(s.credit) || 0));
-                            merged.satCount = Math.max(...group.map(s => parseInt(s.satCount) || 0));
-                            merged.type = 'Elective';
-
-                            finalSubjects.push(merged);
-                        }
-                    });
-                    const sectionSubjects = finalSubjects;
-                    let sectionGrid = generateClassTimetable(semester, section, sectionSubjects, globalReservedSlots, syncElectives, false, globalLabUsage, teachingSlotsCount, globalFacultyLoad);
-                    if (!sectionGrid) sectionGrid = generateClassTimetable(semester, section, sectionSubjects, globalReservedSlots, syncElectives, true, globalLabUsage, teachingSlotsCount, globalFacultyLoad);
-                    if (sectionGrid) {
-                        newGrids[section] = sectionGrid;
-                        sectionGrid.forEach((dayRow, d) => {
+                        if (!sectionFixedLabs[section]) sectionFixedLabs[section] = {};
+                        labGrid.forEach((dayRow, d) => {
                             dayRow.forEach((cell, s) => {
-                                if (cell) {
+                                if (cell && (cell.isLab || cell.duration > 1)) {
+                                    semesterLabSlots[`${d}-${s}`] = true;
+                                    globalLabUsage[`${d}-${cell.code}`] = true;
                                     const key = `${d}-${s}`;
                                     if (!globalReservedSlots[key]) globalReservedSlots[key] = new Set();
-                                    if (cell.teacherName && cell.teacherName !== 'TBA') {
-                                        const tName = cell.teacherName.toUpperCase();
-                                        globalReservedSlots[key].add(tName);
-                                        if (!globalFacultyLoad[tName]) globalFacultyLoad[tName] = { total: 0 };
-                                        if (!globalFacultyLoad[tName][d]) globalFacultyLoad[tName][d] = 0;
-                                        globalFacultyLoad[tName][d]++;
-                                        globalFacultyLoad[tName].total++;
+
+                                    if (cell.allTeachers && cell.allTeachers.length > 0) {
+                                        cell.allTeachers.forEach(t => globalReservedSlots[key].add(t.toUpperCase()));
+                                    } else if (cell.teacherName && cell.teacherName !== 'TBA') {
+                                        globalReservedSlots[key].add(cell.teacherName.toUpperCase());
                                     }
-                                    if (isLabNode(cell) && cell.isStart) globalReservedSlots[key].add('LAB_START');
-                                    if (cell.isLab) {
-                                        globalLabUsage[`${d}-${cell.code}`] = true;
+
+                                    if (cell.isStart) globalReservedSlots[key].add('LAB_START');
+                                    if (cell.isStart) {
+                                        const codes = String(cell.code).split('/').map(c => c.trim());
+                                        codes.forEach(code => {
+                                            if (!sectionFixedLabs[section][code]) sectionFixedLabs[section][code] = [];
+                                            sectionFixedLabs[section][code].push({ d, s, duration: cell.duration || 1 });
+                                        });
                                     }
                                 }
                             });
                         });
                     }
-                });
-                if (Object.keys(newGrids).length > 0) {
-                    updateSchedule(semester, newGrids);
-                    setGrids(newGrids);
+                    if (!labPhaseSuccess) continue;
+                    let fullPhaseSuccess = true;
+                    const phase2FacultyLoad = JSON.parse(JSON.stringify(globalFacultyLoad));
+                    const phase2Reserved = {};
+                    const phase2SyncElectives = {};
+                    for (const section of shuffledSections) {
+                        const mappedSubjects = subjects
+                            .filter(s => s.semester === semester)
+                            .map(sub => {
+                                const subjectTeachers = teachers.filter(t => t.subjectCode === sub.code && t.section === section);
+                                const names = subjectTeachers.map(t => t.name);
+                                let s = {
+                                    ...sub,
+                                    teacherName: names.length > 0 ? names.join(' / ') : 'TBA',
+                                    allTeachers: names
+                                };
+                                if (sectionFixedLabs[section] && sectionFixedLabs[section][s.code]) {
+                                    s.fixedSlots = sectionFixedLabs[section][s.code];
+                                }
+                                return s;
+                            });
+                        const sectionSubjects = [];
+                        const electiveGroups = {};
+                        mappedSubjects.forEach(sub => {
+                            const nameUpper = sub.name.toUpperCase();
+                            const isElective = (sub.type === 'Elective') || nameUpper.includes('ELECTIVE');
+                            if (isElective) {
+                                const match = nameUpper.match(/(OPEN|PROFESSIONAL|FREE|DEPT|DEPARTMENT)?[\s-]*ELECTIVE[\s-–—]*(I{1,3}|IV|V|VI|VII|VIII)\s*(\*?)/);
+                                const groupKey = match ? `${match[1] || ''}ELECTIVE - ${match[2]}${match[3] || ''}` : (sub.type === 'Elective' ? 'GeneralElective' : null);
+                                if (groupKey) {
+                                    if (!electiveGroups[groupKey]) electiveGroups[groupKey] = [];
+                                    electiveGroups[groupKey].push(sub);
+                                    return;
+                                }
+                            }
+                            sectionSubjects.push(sub);
+                        });
+                        Object.values(electiveGroups).forEach(group => {
+                            if (group.length === 1) sectionSubjects.push(group[0]);
+                            else if (group.length > 1) {
+                                const uniqueCodes = Array.from(new Set(group.map(s => s.code)));
+                                const uniqueTeachers = Array.from(new Set(group.flatMap(s => s.allTeachers || [s.teacherName])));
+                                const merged = {
+                                    ...group[0],
+                                    code: uniqueCodes.join(' / '),
+                                    teacherName: uniqueTeachers.filter(t => t && t !== 'TBA').join(' / '),
+                                    allTeachers: uniqueTeachers.filter(t => t && t !== 'TBA'),
+                                    type: 'Elective'
+                                };
+                                merged.credit = Math.max(...group.map(s => parseInt(s.credit) || 0));
+                                merged.satCount = Math.max(...group.map(s => parseInt(s.satCount) || 0));
+                                sectionSubjects.push(merged);
+                            }
+                        });
+                        const isRelaxed = attempt > 10;
+                        let sectionGrid = generateClassTimetable(
+                            semester,
+                            section,
+                            sectionSubjects,
+                            phase2Reserved,
+                            phase2SyncElectives,
+                            isRelaxed,
+                            globalLabUsage,
+                            teachingSlotsCount,
+                            phase2FacultyLoad,
+                            semesterLabSlots
+                        );
+                        if (!sectionGrid) {
+                            fullPhaseSuccess = false;
+                            break;
+                        }
+                        currentGrids[section] = sectionGrid;
+                        sectionGrid.forEach((dayRow, d) => {
+                            dayRow.forEach((cell, s) => {
+                                if (cell) {
+                                    const key = `${d}-${s}`;
+                                    if (!phase2Reserved[key]) phase2Reserved[key] = new Set();
+
+                                    if (cell.allTeachers && cell.allTeachers.length > 0) {
+                                        cell.allTeachers.forEach(t => phase2Reserved[key].add(t.toUpperCase()));
+                                    } else if (cell.teacherName && cell.teacherName !== 'TBA') {
+                                        const tName = cell.teacherName.toUpperCase();
+                                        phase2Reserved[key].add(tName);
+                                    }
+
+                                    if (isLabNode(cell) && cell.isStart) phase2Reserved[key].add('LAB_START');
+                                }
+                            });
+                        });
+                    }
+                    if (fullPhaseSuccess) {
+                        finalGrids = currentGrids;
+                        break;
+                    }
+                }
+                if (finalGrids) {
+                    updateSchedule(semester, finalGrids);
+                    setGrids(finalGrids);
                     setIsGenerated(true);
+                } else {
+                    alert("Could not generate a complete timetable satisfying all lab constraints. Please try reducing fixed slots or checking teacher availability.");
                 }
             } catch (error) {
                 console.error(error);
@@ -181,6 +277,35 @@ const Timetable = () => {
         const newGrids = { ...grids };
         if (editValue === '' || editValue.toUpperCase() === 'FREE') {
             newGrids[section][day][slot] = null;
+        } else if (editValue.startsWith('GROUP:')) {
+            const groupName = editValue.substring(6);
+            const currentSemesterSubjects = subjects.filter(s => s.semester === semester);
+            const groupMembers = currentSemesterSubjects.filter(sub => {
+                const nameUpper = sub.name.toUpperCase();
+                const isElective = (sub.type === 'Elective') || nameUpper.includes('ELECTIVE');
+                if (!isElective) return false;
+                const match = nameUpper.match(/(OPEN|PROFESSIONAL|FREE|DEPT|DEPARTMENT)?[\s-]*ELECTIVE[\s-–—]*(I{1,3}|IV|V|VI|VII|VIII)\s*(\*?)/);
+                const key = match ? `${match[1] || ''}ELECTIVE - ${match[2]}${match[3] || ''}` : (sub.type === 'Elective' ? 'GeneralElective' : null);
+                return key === groupName;
+            });
+            if (groupMembers.length > 0) {
+                const uniqueCodes = Array.from(new Set(groupMembers.map(s => s.code)));
+                const teacherNames = groupMembers.map(sub => {
+                    const t = teachers.find(t => t.subjectCode === sub.code && t.section === section);
+                    return t ? t.name : 'TBA';
+                });
+                const merged = {
+                    ...groupMembers[0],
+                    code: uniqueCodes.join(' / '),
+                    teacherName: teacherNames.join('/'),
+                    type: 'Elective',
+                    duration: 1,
+                    isStart: true
+                };
+                merged.credit = Math.max(...groupMembers.map(s => parseInt(s.credit) || 0));
+                merged.satCount = Math.max(...groupMembers.map(s => parseInt(s.satCount) || 0));
+                newGrids[section][day][slot] = merged;
+            }
         } else {
             const sub = subjects.find(s => s.code === editValue && s.semester === semester);
             const teacher = teachers.find(t => t.subjectCode === editValue && t.section === section);
@@ -606,7 +731,6 @@ const Timetable = () => {
                             </div>
                         )}
                     </div>
-
                     <button className="btn-gen" onClick={handleGenerate} disabled={isGenerating}>
                         <Play size={16} fill="white" /> {isGenerating ? 'GENERATING...' : 'Generate Schedule'}
                     </button>
@@ -696,6 +820,9 @@ const Timetable = () => {
                                                         >
                                                             {cell ? (
                                                                 <>
+                                                                    <div style={{ position: 'absolute', top: '8px', left: '8px', opacity: 0.3 }} title="Edit">
+                                                                        <Edit2 size={12} />
+                                                                    </div>
                                                                     {cell.isFixedFromWord && <Lock className="lock-icon" size={12} style={{ color: shouldShowGreen ? '#15803d' : '#4f46e5', opacity: 0.6 }} />}
                                                                     <div
                                                                         className={shouldShowGreen ? 'lab-code' : 'theory-code'}
@@ -729,51 +856,63 @@ const Timetable = () => {
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
                             {(() => {
                                 const currentGrid = grids[selectedSectionView];
-                                const counts = {};
-                                let totalAllocated = 0;
+                                const allocationCounts = {};
                                 currentGrid.flat().forEach(cell => {
                                     if (cell && cell.code) {
-                                        const parts = cell.code.includes('/') ? cell.code.split('/') : [cell.code];
-                                        parts.forEach(p => {
-                                            const c = p.trim();
-                                            counts[c] = (counts[c] || 0) + 1;
-                                            totalAllocated++;
+                                        const codes = cell.code.split('/').map(c => c.trim()).filter(Boolean);
+                                        const uniqueCodesInSlot = new Set(codes);
+                                        uniqueCodesInSlot.forEach(c => {
+                                            allocationCounts[c] = (allocationCounts[c] || 0) + 1;
                                         });
                                     }
                                 });
-                                const summaryList = subjects
+                                const summaryGroups = new Map();
+                                subjects
                                     .filter(s => s.semester === semester)
-                                    .map(sub => {
+                                    .forEach(sub => {
+                                        const nameUpper = sub.name.toUpperCase();
                                         const teacher = teachers.find(t => t.subjectCode === sub.code && t.section === selectedSectionView);
-                                        return {
-                                            code: sub.code,
-                                            name: sub.name,
-                                            staff: teacher ? teacher.name : 'TBA',
-                                            required: (parseInt(sub.credit) || 0) + (parseInt(sub.satCount) || 0),
-                                            allocated: counts[sub.code] || 0
-                                        };
-                                    });
-                                const summaryListFinal = Object.values(summaryList.reduce((acc, curr) => {
-                                    if (!acc[curr.code]) {
-                                        acc[curr.code] = { ...curr };
-                                    } else {
-                                        acc[curr.code].required += curr.required;
-                                    }
-                                    return acc;
-                                }, {}));
-                                Object.keys(counts).forEach(code => {
-                                    if (!summaryListFinal.find(s => s.code === code)) {
-                                        summaryListFinal.push({
-                                            code: code,
-                                            name: 'Custom / External',
-                                            staff: '-',
-                                            required: 0,
-                                            allocated: counts[code]
-                                        });
-                                    }
-                                });
+                                        const req = (parseInt(sub.credit) || 0) + (parseInt(sub.satCount) || 0);
+                                        const isElective = (sub.type === 'Elective') || nameUpper.includes('ELECTIVE');
+                                        let groupID = sub.code;
+                                        if (isElective) {
+                                            const match = nameUpper.match(/(OPEN|PROFESSIONAL|FREE|DEPT|DEPARTMENT)?[\s-]*ELECTIVE[\s-–—]*(I{1,3}|IV|V|VI|VII|VIII)\s*(\*?)/);
+                                            groupID = match ? `${match[1] || ''}ELECTIVE - ${match[2]}${match[3] || ''}` : `ELECTIVE - ${sub.code}`;
+                                        }
 
-                                const totalReq = summaryListFinal.reduce((acc, s) => acc + s.required, 0);
+                                        if (!summaryGroups.has(groupID)) {
+                                            summaryGroups.set(groupID, {
+                                                codes: new Set([sub.code]),
+                                                names: new Set([sub.name]),
+                                                staff: new Set(teacher ? [teacher.name] : []),
+                                                required: req,
+                                                allocated: allocationCounts[sub.code] || 0,
+                                                isElective: isElective,
+                                                groupID: groupID
+                                            });
+                                        } else {
+                                            const g = summaryGroups.get(groupID);
+                                            g.codes.add(sub.code);
+                                            g.names.add(sub.name);
+                                            if (teacher) g.staff.add(teacher.name);
+
+                                            if (isElective) {
+                                                g.required = Math.max(g.required, req);
+                                                // For elective groups, allocated is any member's count (they share slots)
+                                                g.allocated = Math.max(g.allocated, allocationCounts[sub.code] || 0);
+                                            } else {
+                                                // For subject-code groups (like Lec + Lab), sum requirements
+                                                g.required += req;
+                                                // Allocated should be the total count for this code
+                                                // (Since it's the same code for Lec and Lab, allocationCounts[sub.code] already has the total)
+                                                g.allocated = allocationCounts[sub.code] || 0;
+                                            }
+                                        }
+                                    });
+
+                                let summaryListFinal = Array.from(summaryGroups.values());
+                                const totalPhysicalTarget = summaryListFinal.reduce((acc, s) => acc + s.required, 0);
+                                const totalPhysicalOccupied = currentGrid.flat().filter(cell => cell !== null).length;
 
                                 return (
                                     <>
@@ -782,43 +921,63 @@ const Timetable = () => {
                                                 Total Subjects: <span style={{ fontSize: '1.2rem', marginLeft: '5px' }}>{summaryListFinal.length}</span>
                                             </div>
                                             <div style={{ padding: '0.8rem 1.5rem', background: '#eff6ff', borderRadius: '12px', border: '1px solid #bfdbfe', color: '#1e40af', fontWeight: 'bold', fontSize: '0.9rem' }}>
-                                                Total Assigned: <span style={{ fontSize: '1.2rem', marginLeft: '5px' }}>{totalAllocated}</span> Hrs
+                                                Physical Slots Filled: <span style={{ fontSize: '1.2rem', marginLeft: '5px' }}>{totalPhysicalOccupied}</span> / 42
                                             </div>
                                             <div style={{ padding: '0.8rem 1.5rem', background: '#f0fdf4', borderRadius: '12px', border: '1px solid #bbf7d0', color: '#166534', fontWeight: 'bold', fontSize: '0.9rem' }}>
-                                                Target Hours: <span style={{ fontSize: '1.2rem', marginLeft: '5px' }}>{totalReq}</span> Hrs
+                                                Slots Needed (Target): <span style={{ fontSize: '1.2rem', marginLeft: '5px' }}>{totalPhysicalTarget}</span>
                                             </div>
+                                            {totalPhysicalTarget < 42 && (
+                                                <div style={{ padding: '0.8rem 1.5rem', background: '#fff7ed', borderRadius: '12px', border: '1px solid #ffedd5', color: '#9a3412', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                                                    Expected Gaps: <span style={{ fontSize: '1.2rem', marginLeft: '5px' }}>{42 - totalPhysicalTarget}</span>
+                                                </div>
+                                            )}
                                         </div>
-                                        {summaryListFinal.sort((a, b) => b.allocated - a.allocated).map(stat => {
+                                        {summaryListFinal.map(stat => {
                                             const isMet = stat.allocated >= stat.required;
                                             const difference = stat.allocated - stat.required;
                                             const statusColor = isMet ? '#10b981' : '#f59e0b';
                                             const statusBg = isMet ? '#d1fae5' : '#fef3c7';
+                                            const displayCode = Array.from(stat.codes).join(' / ');
+                                            const displayNames = Array.from(stat.names);
+                                            const displayStaff = Array.from(stat.staff).join(' / ') || 'TBA';
 
                                             return (
-                                                <div key={stat.code} style={{ padding: '1.2rem', borderRadius: '16px', background: '#f8fafc', border: '1px solid #e2e8f0', transition: 'transform 0.2s' }}>
+                                                <div key={stat.groupID} style={{
+                                                    padding: '1.2rem',
+                                                    borderRadius: '16px',
+                                                    background: stat.isElective ? 'linear-gradient(135deg, #f8fafc, #eff6ff)' : '#f8fafc',
+                                                    border: stat.isElective ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+                                                    transition: 'transform 0.2s',
+                                                    position: 'relative',
+                                                    overflow: 'hidden'
+                                                }}>
+                                                    {stat.isElective && (
+                                                        <div style={{ position: 'absolute', top: '0', right: '0', background: '#3b82f6', color: 'white', fontSize: '0.6rem', padding: '2px 8px', borderRadius: '0 0 0 8px', fontWeight: '900' }}>ELECTIVE GROUP</div>
+                                                    )}
                                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.8rem' }}>
-                                                        <span style={{ fontWeight: 900, color: '#3b82f6', fontSize: '1.1rem' }}>{stat.code}</span>
+                                                        <span style={{ fontWeight: 900, color: '#3b82f6', fontSize: displayCode.length > 20 ? '0.8rem' : '1rem' }}>{displayCode}</span>
                                                         <span style={{
                                                             fontWeight: 800,
                                                             color: statusColor,
                                                             background: statusBg,
                                                             padding: '4px 10px', borderRadius: '8px', fontSize: '0.8rem',
-                                                            display: 'flex', alignItems: 'center', gap: '4px'
+                                                            display: 'flex', alignItems: 'center', gap: '4px',
+                                                            minWidth: 'fit-content'
                                                         }}>
                                                             {stat.allocated} / {stat.required} Hrs
-                                                            {difference !== 0 && (
-                                                                <span style={{ opacity: 0.8, fontSize: '0.7rem' }}>
-                                                                    ({difference > 0 ? '+' : ''}{difference})
-                                                                </span>
-                                                            )}
                                                         </span>
                                                     </div>
-                                                    <div style={{ fontSize: '0.85rem', color: '#475569', fontWeight: 700, marginBottom: '0.4rem', lineHeight: '1.3' }}>
-                                                        {stat.name}
+                                                    <div style={{ fontSize: '0.8rem', color: '#475569', fontWeight: 700, marginBottom: '0.6rem', lineHeight: '1.4' }}>
+                                                        {displayNames.map((name, idx) => (
+                                                            <div key={idx} style={{ display: 'flex', gap: '4px', marginBottom: '2px' }}>
+                                                                {displayNames.length > 1 && <span>•</span>}
+                                                                <span>{name}</span>
+                                                            </div>
+                                                        ))}
                                                     </div>
-                                                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', borderTop: '1px solid #f1f5f9', paddingTop: '0.6rem' }}>
                                                         <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#cbd5e1' }}></div>
-                                                        {stat.staff}
+                                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayStaff}</span>
                                                     </div>
                                                 </div>
                                             );
@@ -835,7 +994,6 @@ const Timetable = () => {
                     <p style={{ color: '#cbd5e1', fontWeight: 600, marginTop: '0.5rem' }}>Change the semester or click Generate to start</p>
                 </div>
             )}
-
             {editingCell && (
                 <div className="modal-overlay">
                     <div className="modal-box" style={{ borderRadius: '28px', padding: '2.5rem' }}>
@@ -844,20 +1002,57 @@ const Timetable = () => {
                             <button onClick={() => setEditingCell(null)} style={{ background: '#f8fafc', border: 'none', cursor: 'pointer', color: '#64748b', padding: '8px', borderRadius: '10px' }}><X size={20} /></button>
                         </div>
                         <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '1.5rem', fontWeight: 700 }}>Updating <b>{DAYS[editingCell.day]}</b> Period <b>{editingCell.slot + 1}</b></p>
-                        <select
-                            className="input-field"
-                            style={{ width: '100%', padding: '1rem', borderRadius: '14px', border: '2px solid #f1f5f9', fontWeight: 800, fontSize: '1rem', outline: 'none', appearance: 'none', background: '#f8fafc' }}
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                        >
-                            <option value="">Select Subject...</option>
-                            <option value="FREE">-- Free Period --</option>
-                            {subjects.filter(s => s.semester === semester).map(sub => (
-                                <option key={sub.code} value={sub.code}>
-                                    {sub.code} - {sub.name}
-                                </option>
-                            ))}
-                        </select>
+                        {(() => {
+                            const semSubjects = subjects.filter(s => s.semester === semester);
+                            const groups = {};
+                            const singles = [];
+                            semSubjects.forEach(sub => {
+                                const nameUpper = sub.name.toUpperCase();
+                                const isElective = (sub.type === 'Elective') || nameUpper.includes('ELECTIVE');
+                                let addedToGroup = false;
+                                if (isElective) {
+                                    const match = nameUpper.match(/(OPEN|PROFESSIONAL|FREE|DEPT|DEPARTMENT)?[\s-]*ELECTIVE[\s-–—]*(I{1,3}|IV|V|VI|VII|VIII)\s*(\*?)/);
+                                    const key = match ? `${match[1] || ''}ELECTIVE - ${match[2]}${match[3] || ''}` : (sub.type === 'Elective' ? 'GeneralElective' : null);
+                                    if (key) {
+                                        if (!groups[key]) groups[key] = [];
+                                        groups[key].push(sub);
+                                        addedToGroup = true;
+                                    }
+                                }
+                                if (!addedToGroup) singles.push(sub);
+                            });
+
+                            return (
+                                <select
+                                    className="input-field"
+                                    style={{ width: '100%', padding: '1rem', borderRadius: '14px', border: '2px solid #f1f5f9', fontWeight: 800, fontSize: '1rem', outline: 'none', appearance: 'none', background: '#f8fafc' }}
+                                    value={editValue}
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                >
+                                    <option value="">Select Subject...</option>
+                                    <option value="FREE">-- Free Period --</option>
+                                    <optgroup label="Core Subjects">
+                                        {singles.map(sub => (
+                                            <option key={sub.code} value={sub.code}>
+                                                {sub.code} - {sub.name}
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                    {Object.keys(groups).map(gName => (
+                                        <optgroup key={gName} label={gName}>
+                                            <option value={`GROUP:${gName}`} style={{ fontWeight: 'bold', color: '#2563eb' }}>
+                                                Assign Group: {gName}
+                                            </option>
+                                            {groups[gName].map(sub => (
+                                                <option key={sub.code} value={sub.code}>
+                                                    {sub.code} - {sub.name}
+                                                </option>
+                                            ))}
+                                        </optgroup>
+                                    ))}
+                                </select>
+                            );
+                        })()}
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '2.5rem' }}>
                             <button className="tab-btn" onClick={() => setEditingCell(null)} style={{ border: '1px solid #e2e8f0', boxShadow: 'none' }}>Cancel</button>
                             <button className="tab-btn active" onClick={handleSaveEdit} style={{ padding: '0.6rem 2.5rem' }}>Save Changes</button>
