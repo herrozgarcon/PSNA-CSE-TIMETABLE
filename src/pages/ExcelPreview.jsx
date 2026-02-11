@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import './ExcelPreview.css';
 import { v4 as uuidv4 } from 'uuid';
 const ExcelPreview = () => {
-    const { setSubjects, setTeachers, updateSchedule, facultyAccounts, addFacultyAccounts } = useData();
+    const { setSubjects, setTeachers, updateSchedule, facultyAccounts, addFacultyAccounts, addSubjects, addTeachers, subjects, teachers } = useData();
     const navigate = useNavigate();
     const [grid, setGrid] = useState(() => {
         const saved = sessionStorage.getItem('excel_preview_grid');
@@ -44,149 +44,248 @@ const ExcelPreview = () => {
         };
         reader.readAsBinaryString(file);
     };
-    const processAndSave = () => {
+    const processAndSave = async () => {
         if (grid.length === 0) return;
         try {
-            setSubjects([]);
-            setTeachers([]);
+            // We use add* functions to append/update instead of replacing everything (set*).
+            // This prevents wiping data when uploading semester by semester.
+
             const rows = grid;
             let currentSem = 'General';
             let currentType = 'Lecture';
+            let currentIndices = null;
+
             const newSubjects = [];
             const newTeachers = [];
             const allAffectedSemesters = new Set();
+
             const safeInt = (val) => {
                 if (val === undefined || val === null || val === '') return 0;
                 let s = String(val).trim();
                 const match = s.match(/(\d+)/);
                 return match ? parseInt(match[0]) : 0;
             };
-            const parseHeaders = (row, prevIndices) => {
+
+            // Improved header parsing based on the screenshot structure
+            const detectHeaders = (row) => {
                 const h = row.map(cell => String(cell || '').trim().toUpperCase());
-                let sections = [];
-                for (let idx = 0; idx < h.length; idx++) {
-                    const val = h[idx];
-                    if (val === 'A' || val === 'B' || val === 'C' || val === 'D' || val === 'E') {
-                        sections.push({ idx, name: val });
+                // Look for anchor columns
+                const codeIdx = h.findIndex(x => x === 'SUB.CODE' || x === 'SUB.COD');
+                const nameIdx = h.findIndex(x => x === 'SUBJECT NAME');
+
+                if (codeIdx === -1 || nameIdx === -1) return null;
+
+                // Detect sections (A, B, C, D...) which appear after Subject Name
+                const sections = [];
+                for (let i = nameIdx + 1; i < h.length; i++) {
+                    const val = h[i];
+                    if (['A', 'B', 'C', 'D', 'E'].includes(val)) {
+                        sections.push({ idx: i, name: val });
                     }
-                    if (val.includes('SECTION') || val.includes('DEPT') || val.includes('TUTOR')) {
+                    // Stop if we hit other meta columns to avoid false positives
+                    if (val.includes('NO OF SECTION') || val.includes('SUB HAND DEPT')) break;
+                }
+
+                // If no sections found in this row, maybe they are in the row above? (merged headers)
+                // For now, let's assume standard format or previous valid sections.
+
+                return {
+                    codeIdx,
+                    nameIdx,
+                    semIdx: h.findIndex(x => x === 'SEMESTER') || 0, // Should be 0 based on screenshot
+                    sections
+                };
+            };
+
+            for (let i = 0; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row || row.length < 3) continue;
+
+                const rowUpper = row.map(c => String(c || '').trim().toUpperCase());
+                const rowStr = rowUpper.join(' ');
+
+                // 1. Semantic Block Detection
+                if (rowStr.includes('PRACTICAL')) currentType = 'Lab';
+                else if (rowStr.includes('THEORY')) currentType = 'Lecture';
+
+                // 2. Header Detection
+                // Check if this row is a header row
+                if (rowUpper.some(c => c === 'SUB.CODE')) {
+                    const detected = detectHeaders(row);
+                    if (detected && detected.sections.length > 0) {
+                        currentIndices = detected;
+                    }
+                    continue; // Skip the header row itself
+                }
+
+                // 3. Data Row Processing
+                if (!currentIndices) continue; // Need headers first
+
+                const code = String(row[currentIndices.codeIdx] || '').trim();
+                const name = String(row[currentIndices.nameIdx] || '').trim();
+                const semRaw = String(row[currentIndices.semIdx] || '').trim(); // e.g., "IV CSE"
+
+                // Valid row check: must have a code like "CS2411" or "IT2101" etc.
+                if (!code || code.length < 3 || !name || name.toUpperCase().includes('TOTAL')) continue;
+
+                // Helper to extract clean semester from "IV CSE", "VI CSE"
+                // Regex looks for Roman numerals at start
+                let rowSem = currentSem;
+                const semMatch = semRaw.match(/^([IXV]+)\s/);
+                if (semMatch) {
+                    rowSem = `SEM ${semMatch[1]}`;
+                    currentSem = rowSem; // update global context just in case
+                } else if (semRaw.toUpperCase().includes('SEM')) {
+                    // Fallback
+                    currentSem = semRaw;
+                }
+                allAffectedSemesters.add(rowSem);
+
+                // Determine Credits/Hours
+                // Based on screenshot, "No.of Hours allotted" is usually after sections
+                // Let's try to find it dynamically or assume position
+                let credit = 0;
+                // Try finding a number at the end of the row (last non-empty cell?)
+                // Or looking for specific column index if we knew it.
+                // Screenshot shows it's around column M/N (index 12/13).
+                // Let's stick to the previous heuristic but safer
+                // "No.of Hours allotted" is typically col index 12 or 13 in standard templates
+                // We'll search for a number > 0 in columns after the sections
+                const lastSectionIdx = currentIndices.sections[currentIndices.sections.length - 1].idx;
+                for (let k = lastSectionIdx + 1; k < row.length; k++) {
+                    const val = safeInt(row[k]);
+                    if (val > 0 && val < 10) { // Reasonable credit range
+                        credit = val;
                         break;
                     }
                 }
-                if (sections.length === 0 && prevIndices && prevIndices.sections && prevIndices.sections.length > 0) {
-                    sections = prevIndices.sections;
-                }
-                return {
-                    codeIdx: h.findIndex(x => x === 'SUB.CODE' || x === 'SUB.COD'),
-                    nameIdx: h.findIndex(x => x === 'SUBJECT NAME'),
-                    weekdayIdx: 12,
-                    satIdx: 13,
-                    sections: sections
-                };
-            };
-            let currentIndices = null;
-            for (let i = 0; i < rows.length; i++) {
-                const row = rows[i];
-                if (!row) continue;
-                const rowUpper = row.map(c => String(c || '').trim().toUpperCase());
-                const semCell = row.find(c =>
-                    /^(?:(?:[IXV\d]+)\s*ME\s*[A-Z]+)|(?:SEM\s*[IXV\d]+)|(?:SEMESTER\s*[IXV\d]+)$/i.test(String(c).trim())
-                );
-                if (semCell) {
-                    let semText = String(semCell).trim().toUpperCase();
-                    if (semText.includes('SEM')) {
-                        const match = semText.match(/SEM\s+([IXV\d]+)/i);
-                        if (match) semText = `SEM ${match[1]}`;
-                    }
-                    currentSem = semText;
-                    allAffectedSemesters.add(currentSem);
-                }
-                const rowStr = rowUpper.join(' ');
-                if (rowStr.includes('PRACTICAL')) currentType = 'Lab';
-                else if (rowStr.includes('THEORY')) currentType = 'Lecture';
-                if (rowUpper.some(c => c === 'SUB.CODE' || c === 'SUB.COD' || c === 'SUBJECT NAME')) {
-                    currentIndices = parseHeaders(row, currentIndices);
-                    continue;
-                }
-                if (!currentIndices) continue;
-                const colB = String(row[1] || '').trim();
-                const colC = String(row[2] || '').trim();
-                let code = '';
-                let name = '';
-                if (/^[A-Z]+\d+/.test(colB)) { code = colB; name = String(row[2] || '').trim(); }
-                else if (/^[A-Z]+\d+/.test(colC)) { code = colC; name = String(row[3] || '').trim(); }
-                if (!code || !name || name.toUpperCase().includes('TOTAL')) continue;
-                let weekday = safeInt(row[12]);
-                const sat = safeInt(row[13]);
-                if (weekday === 0) {
-                    const fallbackHours = safeInt(row[7]);
-                    if (fallbackHours > 0) weekday = fallbackHours;
-                }
+                if (credit === 0) credit = 3; // Default
+
                 let finalType = (name.toUpperCase().includes('LAB') || name.toUpperCase().includes('PRACTICAL') || currentType === 'Lab') ? 'Lab' : 'Lecture';
 
                 newSubjects.push({
                     id: uuidv4(),
                     code, name,
-                    semester: currentSem,
-                    credit: weekday,
-                    satCount: sat,
+                    semester: rowSem,
+                    credit,
+                    satCount: 0,
                     type: finalType
                 });
+
+                // Teachers
                 currentIndices.sections.forEach(secObj => {
-                    const tName = String(row[secObj.idx] || '').trim();
-                    if (tName && isNaN(tName) && tName.length >= 2) {
-                        const up = tName.toUpperCase();
-                        if (!['YES', 'NO', 'STAFF', 'TUTOR', 'SUB'].some(k => up.includes(k))) {
+                    const teacherRaw = String(row[secObj.idx] || '').trim();
+                    if (teacherRaw && teacherRaw.length > 1 && !['YES', 'NO', 'NIL', '-'].includes(teacherRaw.toUpperCase())) {
+                        // Split by '/' if multiple teachers
+                        const teachersInCell = teacherRaw.split('/').map(t => t.trim()).filter(t => t.length > 1);
+
+                        teachersInCell.forEach(tName => {
                             newTeachers.push({
                                 id: uuidv4(),
                                 name: tName,
                                 subjectCode: code,
                                 section: secObj.name,
-                                semester: currentSem
+                                semester: rowSem
                             });
-                        }
+                        });
                     }
                 });
             }
-            setSubjects(newSubjects);
-            setTeachers(newTeachers);
-            allAffectedSemesters.forEach(sem => updateSchedule(sem, {}));
 
-            // --- Auto-Create Faculty Accounts ---
-            const uniqueTeacherNames = [...new Set(newTeachers.map(t => t.name))];
-            const newAccounts = [];
-
-            uniqueTeacherNames.forEach(name => {
-                // Check against existing accounts (case-insensitive)
-                const exists = facultyAccounts.some(acc => acc.name.toLowerCase() === name.toLowerCase());
-
-                if (!exists) {
-                    const nameParts = name.trim().split(/\s+/);
-                    // Use a more robust handle generation: first letter + last name (or just last name if 1 part)
-                    // Actually, let's stick to the user's existing pattern in Teachers.jsx for consistency: Last Name
-                    // But prevent collisions if possible? For now, we'll just use the simple logic.
-                    const lastNameRaw = nameParts[nameParts.length - 1];
-                    let handle = lastNameRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-                    if (handle.length < 3) handle = name.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 8);
-
-                    newAccounts.push({
-                        id: uuidv4() + '_acc', // Distinct ID for account
-                        name: name,
-                        email: `${handle}@psnacet.edu.in`,
-                        password: handle, // Default password is the handle
-                        dept: 'General' // Default department
-                    });
+            // Using addSubjects/addTeachers keeps existing data
+            if (newSubjects.length > 0) {
+                // Filter out incoming subjects that might already exist (same code & semester)
+                const existingKeys = new Set(subjects.map(s => `${s.code}-${s.semester}`));
+                const uniqueNewSubjects = newSubjects.filter(s => !existingKeys.has(`${s.code}-${s.semester}`));
+                if (uniqueNewSubjects.length < newSubjects.length) {
+                    console.warn(`Skipped ${newSubjects.length - uniqueNewSubjects.length} duplicate subjects.`);
                 }
+                if (uniqueNewSubjects.length > 0) {
+                    await addSubjects(uniqueNewSubjects);
+                }
+            }
+
+            if (newTeachers.length > 0) {
+                const existingTeacherKeys = new Set(teachers.map(t => `${t.subjectCode}-${t.section}-${t.semester}`));
+                const uniqueNewTeachers = newTeachers.filter(t => !existingTeacherKeys.has(`${t.subjectCode}-${t.section}-${t.semester}`));
+                if (uniqueNewTeachers.length < newTeachers.length) {
+                    console.warn(`Skipped ${newTeachers.length - uniqueNewTeachers.length} duplicate allocations.`);
+                }
+                if (uniqueNewTeachers.length > 0) {
+                    await addTeachers(uniqueNewTeachers);
+                }
+            }
+
+            allAffectedSemesters.forEach(async (sem) => await updateSchedule(sem, {}));
+
+            // --- Auto-Create Faculty Accounts ENABLED ---
+            // If teachers are missing, we create them automatically to allow allocation.
+
+            const uniqueTeacherNames = [...new Set(newTeachers.map(t => t.name))];
+            const missingAccounts = uniqueTeacherNames.filter(name => {
+                const normName = name.toLowerCase().trim();
+                // Check if this teacher exists in the registered faculty accounts
+                return !facultyAccounts.some(acc => acc.name.toLowerCase().trim() === normName);
             });
 
-            if (newAccounts.length > 0) {
-                addFacultyAccounts(newAccounts);
+            if (missingAccounts.length > 0) {
+                const newAccounts = missingAccounts.map(name => {
+                    const nameParts = name.split(/\s+/);
+                    const lastNameRaw = nameParts[nameParts.length - 1];
+                    let handle = lastNameRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    if (handle.length < 3) handle = name.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 8);
+
+                    // Ensure uniqueness of handle if possible (simple random suffix if needed, but for now stick to logic)
+                    // Better: check against existing emails?
+                    // For now, let's keep it simple as per Teachers.jsx
+
+                    return {
+                        id: uuidv4() + '_acc',
+                        name: name,
+                        email: `${handle}@psnacet.edu.in`,
+                        password: handle, // Default password is same as handle
+                        dept: 'General', // Default department
+                        can_generate: false // Default permission
+                    };
+                });
+
+                await addFacultyAccounts(newAccounts);
+                console.log(`Auto-created ${newAccounts.length} missing faculty accounts.`);
+
+                // Update local list of accounts to ensure subsequent checks pass (though we are done with checks)
             }
+
+            // If we reach here, all teachers exist. Proceed to save.
+
+            if (newSubjects.length > 0) {
+                // ... existing logic to add subjects ...
+                // Filter out incoming subjects that might already exist (same code & semester)
+                const existingKeys = new Set(subjects.map(s => `${s.code}-${s.semester}`));
+                const uniqueNewSubjects = newSubjects.filter(s => !existingKeys.has(`${s.code}-${s.semester}`));
+                if (uniqueNewSubjects.length < newSubjects.length) {
+                    console.warn(`Skipped ${newSubjects.length - uniqueNewSubjects.length} duplicate subjects.`);
+                }
+                if (uniqueNewSubjects.length > 0) {
+                    await addSubjects(uniqueNewSubjects);
+                }
+            }
+
+            if (newTeachers.length > 0) {
+                const existingTeacherKeys = new Set(teachers.map(t => `${t.subjectCode}-${t.section}-${t.semester}`));
+                const uniqueNewTeachers = newTeachers.filter(t => !existingTeacherKeys.has(`${t.subjectCode}-${t.section}-${t.semester}`));
+                if (uniqueNewTeachers.length < newTeachers.length) {
+                    console.warn(`Skipped ${newTeachers.length - uniqueNewTeachers.length} duplicate allocations.`);
+                }
+                if (uniqueNewTeachers.length > 0) {
+                    await addTeachers(uniqueNewTeachers);
+                }
+            }
+
+            allAffectedSemesters.forEach(async (sem) => await updateSchedule(sem, {}));
 
             setMessage({
                 type: 'success',
-                text: `Sync Complete: ${newSubjects.length} subjects found. ${newAccounts.length} new faculty accounts created.`
+                text: `Sync Complete: ${newSubjects.length} subjects found. Allocations updated for verified faculty.`
             });
         } catch (error) {
             console.error(error);

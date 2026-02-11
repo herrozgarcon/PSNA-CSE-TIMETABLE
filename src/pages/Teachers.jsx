@@ -134,32 +134,15 @@ const Teachers = () => {
     };
 
     const displayData = React.useMemo(() => {
-        const allocatedNames = new Set(teachers.map(t => t.name.toLowerCase()));
-        const allocations = teachers.map(t => ({ ...t, type: 'allocation' }));
-
-        const unallocated = (facultyAccounts || [])
-            .filter(acc => !allocatedNames.has(acc.name.toLowerCase()))
-            .map(acc => ({
-                id: acc.id,
-                name: acc.name,
-                dept: acc.dept,
-                semester: '-',
-                subjectCode: '-',
-                subjectName: 'Not Assigned',
-                section: '-',
-                type: 'account'
-            }));
-
-        return [...allocations, ...unallocated];
-    }, [teachers, facultyAccounts]);
+        return facultyAccounts || [];
+    }, [facultyAccounts]);
 
     const filtered = displayData.filter(t => {
         const matchesSearch = t.name.toLowerCase().includes(search.toLowerCase()) ||
-            (t.subjectName && t.subjectName.toLowerCase().includes(search.toLowerCase()));
-        const matchesSem = filterSem === 'All' || t.semester === filterSem || (t.semester === '-' && filterSem === 'All');
-        return matchesSearch && matchesSem;
+            (t.email && t.email.toLowerCase().includes(search.toLowerCase()));
+        return matchesSearch;
     });
-    const uniqueSems = Array.from(new Set(teachers.map(t => t.semester).filter(Boolean))).sort();
+
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const dropdownRef = React.useRef(null);
 
@@ -175,13 +158,12 @@ const Teachers = () => {
         <div>
             <div className="page-header">
                 <div>
-                    <h1 className="page-title">Teachers</h1>
-                    <p style={{ color: 'var(--text-light)' }}>Faculty allocations and details</p>
+                    <h1 className="page-title">Faculty Management</h1>
+                    <p style={{ color: 'var(--text-light)' }}>Manage registered faculty accounts</p>
                 </div>
                 <div>
                     <button className="btn btn-danger" onClick={() => {
-                        if (window.confirm('Are you sure you want to delete ALL teacher allocations? This cannot be undone.')) clearTeachers();
-                        if (window.confirm('Are you sure you want to delete ALL teacher allocations? This cannot be undone.')) clearTeachers();
+                        if (window.confirm('Are you sure you want to delete ALL faculty accounts? This cannot be undone.')) clearTeachers();
                     }} style={{ color: 'white', marginRight: '1rem' }}>
                         <Trash2 size={18} /> Delete All
                     </button>
@@ -209,31 +191,10 @@ const Teachers = () => {
                         <Search size={18} />
                         <input
                             className="elegant-input"
-                            placeholder="Search faculty by name or subject..."
+                            placeholder="Search faculty by name..."
                             value={search}
                             onChange={e => setSearch(e.target.value)}
                         />
-                    </div>
-                    <div className="filter-group">
-                        <Filter size={18} color="#94a3b8" />
-
-                        <div className="custom-select-container">
-                            <div
-                                className={`custom-select-trigger ${isDropdownOpen ? 'active' : ''}`}
-                                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                            >
-                                <span>{filterSem === 'All' ? 'All Semesters' : `Sem ${filterSem}`}</span>
-                                <Search size={14} style={{ transform: isDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s', opacity: 0.5 }} />
-                            </div>
-                            {isDropdownOpen && (
-                                <div className="custom-select-menu">
-                                    <div className={`custom-select-item ${filterSem === 'All' ? 'selected' : ''}`} onClick={() => { setFilterSem('All'); setIsDropdownOpen(false); }}>All Semesters</div>
-                                    {uniqueSems.map(s => (
-                                        <div key={s} className={`custom-select-item ${filterSem === s ? 'selected' : ''}`} onClick={() => { setFilterSem(s); setIsDropdownOpen(false); }}>Sem {s}</div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
                     </div>
                 </div>
                 <div className="table-container" style={{ border: 'none', borderRadius: 0 }}>
@@ -242,9 +203,8 @@ const Teachers = () => {
                             <tr>
                                 <th>Name</th>
                                 <th>Department</th>
-                                <th>Semester</th>
-                                <th>Subject</th>
-                                <th>Section</th>
+                                <th>Email / Handle</th>
+                                <th style={{ textAlign: 'center' }}>Permission</th>
                                 <th style={{ textAlign: 'right' }}>Action</th>
                             </tr>
                         </thead>
@@ -253,24 +213,21 @@ const Teachers = () => {
                                 <tr key={t.id || idx}>
                                     <td style={{ fontWeight: '500' }}>{t.name}</td>
                                     <td><span className="badge badge-info">{t.dept || 'General'}</span></td>
-                                    <td>Sem {t.semester}</td>
-                                    <td>
-                                        <div style={{ fontWeight: '600', fontSize: '0.85rem' }}>{t.subjectCode}</div>
-                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>{t.subjectName}</div>
+                                    <td>{t.email}</td>
+                                    <td style={{ textAlign: 'center' }}>
+                                        {t.can_generate ? (
+                                            <span className="badge badge-success">Admin</span>
+                                        ) : (
+                                            <span className="badge" style={{ background: '#f1f5f9', color: '#64748b' }}>Standard</span>
+                                        )}
                                     </td>
-                                    <td><span className="badge badge-outline">Section {t.section}</span></td>
                                     <td style={{ textAlign: 'right' }}>
                                         <button
                                             className="btn-outline"
                                             style={{ border: 'none', color: 'var(--danger)', padding: '4px', cursor: 'pointer' }}
                                             onClick={() => {
-                                                const msg = t.type === 'account'
-                                                    ? 'Delete this faculty account? They will be removed from the system.'
-                                                    : 'Delete this allocation? The faculty account will remain.';
-
-                                                if (window.confirm(msg)) {
-                                                    if (t.type === 'account') deleteFacultyAccount(t.id);
-                                                    else deleteTeachers(t.id);
+                                                if (window.confirm(`Delete faculty account for ${t.name}?`)) {
+                                                    deleteFacultyAccount(t.id);
                                                 }
                                             }}
                                         >
@@ -279,7 +236,7 @@ const Teachers = () => {
                                     </td>
                                 </tr>
                             ))}
-                            {filtered.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: '2rem' }}>No records found.</td></tr>}
+                            {filtered.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', padding: '2rem' }}>No faculty accounts found.</td></tr>}
                         </tbody>
                     </table>
                 </div>

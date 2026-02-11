@@ -251,13 +251,15 @@ const WordPreview = () => {
                     const norm = String(sub.code || '').replace(/[^A-Za-z0-9]/g, '');
                     const fixed = grouped[norm] || null;
                     if (fixed) {
-                        return { ...sub, fixedSlots: fixed };
+                        return { ...sub, fixed_slots: fixed };
                     }
                     return sub;
                 });
                 setSubjects(updated);
+                setMessage({ type: 'success', text: `Locked ${extractedConstraints.length} hard conditions from Word file.` });
+            } else {
+                setMessage({ type: 'error', text: 'No subjects found in database! Please Import Excel first.' });
             }
-            setMessage({ type: 'success', text: `Locked ${extractedConstraints.length} hard conditions from Word file.` });
         } catch (err) {
             console.error(err);
             setMessage({ type: 'error', text: 'Error applying constraints.' });
