@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import './ExcelPreview.css';
 import { v4 as uuidv4 } from 'uuid';
 const ExcelPreview = () => {
-    const { setSubjects, setTeachers, updateSchedule } = useData();
+    const { setSubjects, setTeachers, updateSchedule, facultyAccounts, addFacultyAccounts } = useData();
     const navigate = useNavigate();
     const [grid, setGrid] = useState(() => {
         const saved = sessionStorage.getItem('excel_preview_grid');
@@ -152,7 +152,42 @@ const ExcelPreview = () => {
             setTeachers(newTeachers);
             allAffectedSemesters.forEach(sem => updateSchedule(sem, {}));
 
-            setMessage({ type: 'success', text: `Sync Complete: ${newSubjects.length} subjects found.` });
+            // --- Auto-Create Faculty Accounts ---
+            const uniqueTeacherNames = [...new Set(newTeachers.map(t => t.name))];
+            const newAccounts = [];
+
+            uniqueTeacherNames.forEach(name => {
+                // Check against existing accounts (case-insensitive)
+                const exists = facultyAccounts.some(acc => acc.name.toLowerCase() === name.toLowerCase());
+
+                if (!exists) {
+                    const nameParts = name.trim().split(/\s+/);
+                    // Use a more robust handle generation: first letter + last name (or just last name if 1 part)
+                    // Actually, let's stick to the user's existing pattern in Teachers.jsx for consistency: Last Name
+                    // But prevent collisions if possible? For now, we'll just use the simple logic.
+                    const lastNameRaw = nameParts[nameParts.length - 1];
+                    let handle = lastNameRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+                    if (handle.length < 3) handle = name.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 8);
+
+                    newAccounts.push({
+                        id: uuidv4() + '_acc', // Distinct ID for account
+                        name: name,
+                        email: `${handle}@psnacet.edu.in`,
+                        password: handle, // Default password is the handle
+                        dept: 'General' // Default department
+                    });
+                }
+            });
+
+            if (newAccounts.length > 0) {
+                addFacultyAccounts(newAccounts);
+            }
+
+            setMessage({
+                type: 'success',
+                text: `Sync Complete: ${newSubjects.length} subjects found. ${newAccounts.length} new faculty accounts created.`
+            });
         } catch (error) {
             console.error(error);
             setMessage({ type: 'error', text: 'Import failed. Check Excel format.' });

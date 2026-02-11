@@ -1,11 +1,28 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Calendar, Layers, Printer } from 'lucide-react';
+import { Calendar, Layers, Printer, Lock, Save } from 'lucide-react';
+import Modal from '../components/Modal';
 
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 
-const FacultyDashboard = ({ facultyName }) => {
-    const { schedule, department } = useData();
+const FacultyDashboard = ({ facultyName, facultyId }) => {
+    const { schedule, department, updateFacultyPassword } = useData();
+    const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+    const [passwords, setPasswords] = useState({ new: '', confirm: '' });
+
+    const handlePasswordChange = async () => {
+        if (!passwords.new || !passwords.confirm) return alert('Please fill all fields');
+        if (passwords.new !== passwords.confirm) return alert('Passwords do not match');
+        if (passwords.new.length < 4) return alert('Password too short');
+
+        const error = await updateFacultyPassword(facultyId, passwords.new);
+        if (error) alert('Error updating password');
+        else {
+            alert('Password updated successfully');
+            setIsPasswordModalOpen(false);
+            setPasswords({ new: '', confirm: '' });
+        }
+    };
 
     // Compute the faculty's personal timetable
     const mySchedule = useMemo(() => {
@@ -209,6 +226,9 @@ const FacultyDashboard = ({ facultyName }) => {
                         </div>
                     </div>
                     <div className="control-group">
+                        <button className="btn-premium btn-print" onClick={() => setIsPasswordModalOpen(true)}>
+                            <Lock size={18} /> Change Password
+                        </button>
                         <button className="btn-premium btn-print" onClick={() => window.print()}>
                             <Printer size={18} /> Print Official
                         </button>
@@ -383,6 +403,36 @@ const FacultyDashboard = ({ facultyName }) => {
                     </tbody>
                 </table>
             </div>
+            {/* Password Modal */}
+            <Modal isOpen={isPasswordModalOpen} onClose={() => setIsPasswordModalOpen(false)} title="Change Password">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500' }}>New Password</label>
+                        <input
+                            type="password"
+                            className="input-field"
+                            style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                            value={passwords.new}
+                            onChange={e => setPasswords({ ...passwords, new: e.target.value })}
+                            placeholder="Enter new password"
+                        />
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500' }}>Confirm Password</label>
+                        <input
+                            type="password"
+                            className="input-field"
+                            style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                            value={passwords.confirm}
+                            onChange={e => setPasswords({ ...passwords, confirm: e.target.value })}
+                            placeholder="Confirm new password"
+                        />
+                    </div>
+                    <button className="btn btn-primary" onClick={handlePasswordChange} style={{ marginTop: '0.5rem', justifyContent: 'center' }}>
+                        <Save size={18} style={{ marginRight: 8 }} /> Update Password
+                    </button>
+                </div>
+            </Modal>
         </div>
     );
 };

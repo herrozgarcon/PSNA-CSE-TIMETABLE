@@ -232,6 +232,14 @@ export const DataProvider = ({ children }) => {
         if (error) console.error("Error updating faculty permission:", error);
     };
 
+    const updateFacultyPassword = async (id, newPassword) => {
+        const hashedPassword = bcrypt.hashSync(newPassword, 10);
+        _setFacultyAccounts(prev => prev.map(a => a.id === id ? { ...a, password: hashedPassword } : a));
+        const { error } = await supabase.from('faculty_accounts').update({ password: hashedPassword }).eq('id', id);
+        if (error) console.error("Error updating faculty password:", error);
+        return error;
+    };
+
     const clearFacultyAccounts = async () => {
         _setFacultyAccounts([]);
         const { error } = await supabase.from('faculty_accounts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -351,6 +359,7 @@ export const DataProvider = ({ children }) => {
             addFacultyAccounts,
             deleteFacultyAccount,
             updateFacultyPermission,
+            updateFacultyPassword,
             clearFacultyAccounts,
             setFacultyAccounts,
 

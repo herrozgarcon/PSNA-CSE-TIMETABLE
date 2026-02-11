@@ -1,41 +1,162 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Search, Filter, Plus, Trash2, Save } from 'lucide-react';
+import { Search, Filter, Plus, Trash2, Save, FileSpreadsheet, Download } from 'lucide-react';
 import Modal from '../components/Modal';
+import { useNavigate } from 'react-router-dom';
+
+import * as XLSX from 'xlsx';
+import { v4 as uuidv4 } from 'uuid';
+
+
 const Teachers = () => {
-    const { teachers, addTeachers, deleteTeachers, clearTeachers, addFacultyAccounts } = useData();
+    const { teachers, addTeachers, deleteTeachers, clearTeachers, addFacultyAccounts, facultyAccounts, deleteFacultyAccount } = useData();
+    const navigate = useNavigate();
+    const fileInputRef = React.useRef(null);
+    const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState('');
     const [filterSem, setFilterSem] = useState('All');
     const [isAddOpen, setIsAddOpen] = useState(false);
+
     const [newTeacher, setNewTeacher] = useState({
         name: '',
-        dept: 'CSE',
-        semester: 'I',
-        subjectCode: '',
-        subjectName: '',
-        section: 'A'
+        dept: 'CSE'
     });
+
     const handleAddTeacher = () => {
-        if (!newTeacher.name || !newTeacher.subjectCode) return;
-        addTeachers([{ ...newTeacher, id: Date.now().toString() }]);
-        const nameParts = newTeacher.name.trim().split(/\s+/);
+        if (!newTeacher.name) return;
+
+        const name = newTeacher.name.trim();
+        const nameParts = name.split(/\s+/);
         const lastNameRaw = nameParts[nameParts.length - 1];
-        const handle = lastNameRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
+        let handle = lastNameRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (handle.length < 3) handle = name.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 8);
+
         addFacultyAccounts([{
-            id: Date.now().toString() + '_acc',
-            name: newTeacher.name,
+            id: uuidv4() + '_acc',
+            name: name,
             email: `${handle}@psnacet.edu.in`,
             password: handle,
             dept: newTeacher.dept
         }]);
         alert(`Faculty Account Created!\n\nEmail: ${handle}@psnacet.edu.in\nPassword: ${handle}`);
         setIsAddOpen(false);
-        setNewTeacher({ name: '', dept: 'CSE', semester: 'I', subjectCode: '', subjectName: '', section: 'A' });
+        setNewTeacher({ name: '', dept: 'CSE' });
     };
-    const filtered = teachers.filter(t => {
+
+    const handleExcelUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setLoading(true);
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const bstr = evt.target.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const ws = wb.Sheets[wb.SheetNames[0]]; // Take first sheet
+
+                // Expecting Simple List: Name, Dept
+                const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+                // Check Header
+                const headerRow = jsonData[0] ? jsonData[0].map(h => String(h).toLowerCase().trim()) : [];
+                const validHeaders = headerRow.includes('faculty name') || headerRow.includes('name');
+
+                if (!validHeaders) {
+                    alert('Invalid Format! Please upload an Excel file with specific columns: "Faculty Name" and "Department".\nUse the Template button to download the correct format.');
+                    setLoading(false);
+                    e.target.value = null;
+                    return;
+                }
+
+                const newAccs = [];
+                let addedCount = 0;
+
+                // Start from row 1 (skip header)
+                for (let i = 1; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (!row || row.length === 0) continue;
+
+                    const name = String(row[0] || '').trim();
+                    const dept = String(row[1] || 'CSE').trim();
+
+                    if (name.length > 2) {
+                        const exists = (facultyAccounts || []).some(acc => acc.name.toLowerCase() === name.toLowerCase());
+                        if (!exists) {
+                            const nameParts = name.split(/\s+/);
+                            const lastNameRaw = nameParts[nameParts.length - 1];
+                            let handle = lastNameRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            if (handle.length < 3) handle = name.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 8);
+
+                            newAccs.push({
+                                id: uuidv4() + '_acc',
+                                name: name,
+                                email: `${handle}@psnacet.edu.in`,
+                                password: handle,
+                                dept: dept
+                            });
+                            addedCount++;
+                        }
+                    }
+                }
+
+                if (newAccs.length > 0) {
+                    addFacultyAccounts(newAccs);
+                    alert(`Success! Created ${addedCount} new faculty accounts.`);
+                } else {
+                    alert('No new faculty accounts created. They might already exist or the file is empty.');
+                }
+
+            } catch (err) {
+                console.error(err);
+                alert('Error parsing Excel file.');
+            } finally {
+                setLoading(false);
+                e.target.value = null;
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
+    const handleDownloadTemplate = () => {
+        const wb = XLSX.utils.book_new();
+
+        const wsDataF = [
+            ["Faculty Name", "Department"],
+            ["Dr. John Smith", "CSE"],
+            ["Prof. Jane Doe", "IT"],
+            ["Mr. Alan Turing", "CSE"]
+        ];
+        const wsF = XLSX.utils.aoa_to_sheet(wsDataF);
+        XLSX.utils.book_append_sheet(wb, wsF, "Faculty_List");
+
+        XLSX.writeFile(wb, "Faculty_Upload_Template.xlsx");
+    };
+
+    const displayData = React.useMemo(() => {
+        const allocatedNames = new Set(teachers.map(t => t.name.toLowerCase()));
+        const allocations = teachers.map(t => ({ ...t, type: 'allocation' }));
+
+        const unallocated = (facultyAccounts || [])
+            .filter(acc => !allocatedNames.has(acc.name.toLowerCase()))
+            .map(acc => ({
+                id: acc.id,
+                name: acc.name,
+                dept: acc.dept,
+                semester: '-',
+                subjectCode: '-',
+                subjectName: 'Not Assigned',
+                section: '-',
+                type: 'account'
+            }));
+
+        return [...allocations, ...unallocated];
+    }, [teachers, facultyAccounts]);
+
+    const filtered = displayData.filter(t => {
         const matchesSearch = t.name.toLowerCase().includes(search.toLowerCase()) ||
             (t.subjectName && t.subjectName.toLowerCase().includes(search.toLowerCase()));
-        const matchesSem = filterSem === 'All' || t.semester === filterSem;
+        const matchesSem = filterSem === 'All' || t.semester === filterSem || (t.semester === '-' && filterSem === 'All');
         return matchesSearch && matchesSem;
     });
     const uniqueSems = Array.from(new Set(teachers.map(t => t.semester).filter(Boolean))).sort();
@@ -60,9 +181,23 @@ const Teachers = () => {
                 <div>
                     <button className="btn btn-danger" onClick={() => {
                         if (window.confirm('Are you sure you want to delete ALL teacher allocations? This cannot be undone.')) clearTeachers();
+                        if (window.confirm('Are you sure you want to delete ALL teacher allocations? This cannot be undone.')) clearTeachers();
                     }} style={{ color: 'white', marginRight: '1rem' }}>
                         <Trash2 size={18} /> Delete All
                     </button>
+                    <button className="btn btn-outline" onClick={handleDownloadTemplate} style={{ marginRight: '1rem', background: 'white', color: '#0f172a', border: '1px solid #e2e8f0' }}>
+                        <Download size={18} /> Template
+                    </button>
+                    <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} style={{ marginRight: '1rem', background: 'white', color: '#0f172a', border: '1px solid #e2e8f0' }} disabled={loading}>
+                        <FileSpreadsheet size={18} /> {loading ? 'Importing...' : 'Import Excel'}
+                    </button>
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleExcelUpload}
+                        accept=".xlsx,.xls"
+                        style={{ display: 'none' }}
+                    />
                     <button className="btn btn-primary" onClick={() => setIsAddOpen(true)}>
                         <Plus size={18} /> Add Teacher
                     </button>
@@ -129,7 +264,14 @@ const Teachers = () => {
                                             className="btn-outline"
                                             style={{ border: 'none', color: 'var(--danger)', padding: '4px', cursor: 'pointer' }}
                                             onClick={() => {
-                                                if (window.confirm('Delete this teacher allocation?')) deleteTeachers(t.id);
+                                                const msg = t.type === 'account'
+                                                    ? 'Delete this faculty account? They will be removed from the system.'
+                                                    : 'Delete this allocation? The faculty account will remain.';
+
+                                                if (window.confirm(msg)) {
+                                                    if (t.type === 'account') deleteFacultyAccount(t.id);
+                                                    else deleteTeachers(t.id);
+                                                }
                                             }}
                                         >
                                             <Trash2 size={16} />
@@ -151,28 +293,6 @@ const Teachers = () => {
                     <div>
                         <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>Department</label>
                         <input className="input-field" style={{ width: '100%' }} value={newTeacher.dept} onChange={e => setNewTeacher({ ...newTeacher, dept: e.target.value })} placeholder="e.g. CSE" />
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>Semester</label>
-                            <select className="input-field" style={{ width: '100%' }} value={newTeacher.semester} onChange={e => setNewTeacher({ ...newTeacher, semester: e.target.value })}>
-                                {Array.from(new Set([...uniqueSems, 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'])).map(s => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>Section</label>
-                            <select className="input-field" style={{ width: '100%' }} value={newTeacher.section} onChange={e => setNewTeacher({ ...newTeacher, section: e.target.value })}>
-                                {['A', 'B', 'C', 'D', 'E', 'F'].map(s => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                        </div>
-                    </div>
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>Subject Code</label>
-                        <input className="input-field" style={{ width: '100%' }} value={newTeacher.subjectCode} onChange={e => setNewTeacher({ ...newTeacher, subjectCode: e.target.value })} placeholder="e.g. CS123" />
-                    </div>
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '4px', fontWeight: '500' }}>Subject Name</label>
-                        <input className="input-field" style={{ width: '100%' }} value={newTeacher.subjectName} onChange={e => setNewTeacher({ ...newTeacher, subjectName: e.target.value })} placeholder="e.g. Data Structures" />
                     </div>
                     <button className="btn btn-primary" onClick={handleAddTeacher} style={{ marginTop: '0.5rem' }}>
                         <Save size={18} style={{ marginRight: 8 }} /> Save Allocation

@@ -71,7 +71,7 @@ function App() {
                             </>
                         ) : (
                             <>
-                                <Route path="/" element={<FacultyDashboard facultyName={currentUser?.name || 'Faculty'} />} />
+                                <Route path="/" element={<FacultyDashboard facultyName={currentUser?.name || 'Faculty'} facultyId={currentUser?.id} />} />
 
                                 {currentUser?.can_generate && (
                                     <>
